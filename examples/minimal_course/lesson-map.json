@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0",
+  "map_kind": "lesson-reconstruction",
+  "subject": "generic",
+  "profile": "generic",
+  "title": "A minimal traceable lesson",
+  "source": {"project_id": "minimal-course"},
+  "sources": [
+    {
+      "source_id": "source::slides",
+      "kind": "slides",
+      "name": "lesson-slides.pdf",
+      "portable_path": "lesson-slides.pdf",
+      "read_only": true
+    },
+    {
+      "source_id": "source::transcript",
+      "kind": "transcript",
+      "name": "lesson-transcript.vtt",
+      "portable_path": "lesson-transcript.vtt",
+      "read_only": true
+    }
+  ],
+  "pages": [
+    {
+      "visual_id": "slides::p001",
+      "source_id": "source::slides",
+      "page": 1,
+      "title": "The question",
+      "status": "covered",
+      "text": "A system model connects evidence to an explanation."
+    },
+    {
+      "visual_id": "slides::p002",
+      "source_id": "source::slides",
+      "page": 2,
+      "title": "The mechanism",
+      "status": "covered",
+      "text": "Trace the steps before choosing an answer."
+    }
+  ],
+  "audio_segments": [
+    {
+      "segment_id": "transcript::s001",
+      "source_id": "source::transcript",
+      "start": 12.0,
+      "end": 28.0,
+      "text": "先确定材料中能直接观察到的事实，再补上中间机制。",
+      "status": "aligned",
+      "alignment": {
+        "visual_ids": ["slides::p001"],
+        "unit_ids": ["unit::model"],
+        "confidence": "high",
+        "status": "aligned"
+      }
+    }
+  ],
+  "units": [
+    {
+      "unit_id": "unit::model",
+      "title": "从证据到机制",
+      "unit_kind": "concept",
+      "visual_ids": ["slides::p001", "slides::p002"],
+      "segment_ids": ["transcript::s001"],
+      "understanding_level": "U3",
+      "exam_evidence_level": "E1",
+      "logic_chain": "观察证据 -> 识别机制 -> 检查结果",
+      "representative_example": "把一个新案例拆成可观察事实和解释步骤。",
+      "learner_action": "能在新例子中指出证据、机制和结果。",
+      "transfer_question": "如果中间机制改变，结论还成立吗？",
+      "status": "verified"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim::model",
+      "unit_id": "unit::model",
+      "text": "解释不能跳过证据到结果之间的机制。",
+      "sources": [
+        {
+          "evidence_id": "evidence::p002",
+          "kind": "material",
+          "ref": "slides::p002",
+          "page": 2,
+          "verified": true,
+          "status": "verified"
+        },
+        {
+          "evidence_id": "evidence::s001",
+          "kind": "classroom_transcript",
+          "ref": "source::transcript@00:12–00:28",
+          "start": 12.0,
+          "end": 28.0,
+          "quote": "先确定材料中能直接观察到的事实，再补上中间机制。",
+          "verified": true,
+          "status": "verified"
+        }
+      ],
+      "source_labels": ["材料·p.2", "课堂转述·00:12–00:28"],
+      "understanding_level": "U3",
+      "exam_evidence_level": "E1",
+      "alignment_confidence": "high",
+      "status": "verified"
+    }
+  ],
+  "review_items": [
+    {
+      "review_id": "review::model",
+      "prompt": "请用一句话说明为什么不能从证据直接跳到结论。",
+      "answer": "因为缺少机制，无法解释条件如何产生结果。",
+      "answer_hidden": true,
+      "unit_id": "unit::model",
+      "status": "ready"
+    }
+  ],
+  "notes": {
+    "status": "fixture",
+    "message": "公开脱敏 fixture；不代表任何真实课程或教师。"
+  }
+}

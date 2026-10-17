@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "project_id": "minimal-course",
+  "subject": "generic",
+  "profile": "generic",
+  "source_manifest": [
+    {
+      "source_id": "source::slides",
+      "kind": "slides",
+      "name": "lesson-slides.pdf",
+      "portable_path": "lesson-slides.pdf",
+      "read_only": true,
+      "sha256": "fixture-slides"
+    },
+    {
+      "source_id": "source::transcript",
+      "kind": "transcript",
+      "name": "lesson-transcript.vtt",
+      "portable_path": "lesson-transcript.vtt",
+      "read_only": true,
+      "sha256": "fixture-transcript"
+    }
+  ],
+  "privacy": {
+    "originals_read_only": true,
+    "publish_originals": false
+  }
+}

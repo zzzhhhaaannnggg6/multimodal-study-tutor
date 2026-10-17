@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f6f2" />
+    <meta
+      name="description"
+      content="将课件、教师语音与知识证据放在同一条可回跳的学习时间轴上。"
+    />
+    <title>课堂重建 · Multimodal Study Tutor</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="课堂重建首页">
+          <span class="brand-mark" aria-hidden="true">∿</span>
+          <span class="brand-copy">
+            <strong>课堂重建</strong>
+            <small>Multimodal Study Tutor</small>
+          </span>
+        </a>
+        <div class="topbar-actions">
+          <span class="source-status" id="sourceStatus" data-kind="demo">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="sourceStatusText">演示地图</span>
+          </span>
+          <label class="icon-button" title="加载本地 lesson-map JSON" aria-label="加载本地 lesson-map JSON">
+            <span aria-hidden="true">↥</span>
+            <input id="mapFile" type="file" accept=".json,application/json" />
+          </label>
+          <button class="icon-button" id="resetDemo" type="button" title="回到演示地图" aria-label="回到演示地图">
+            <span aria-hidden="true">↺</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace" id="workspace">
+        <section class="workspace-heading" aria-labelledby="projectTitle">
+          <div class="heading-copy">
+            <p class="eyebrow" id="projectEyebrow">学习项目 / 课堂地图</p>
+            <h1 id="projectTitle">正在载入课堂地图</h1>
+            <p class="heading-summary" id="projectSummary">
+              课件是视觉主线，教师语音补充重点、逻辑与评价信号。
+            </p>
+          </div>
+          <div class="mode-switch" role="group" aria-label="学习视图">
+            <button class="mode-button is-active" type="button" data-mode="understanding" aria-pressed="true">
+              <span class="mode-index">01</span>
+              <span>理解课堂</span>
+            </button>
+            <button class="mode-button" type="button" data-mode="extraction" aria-pressed="false">
+              <span class="mode-index">02</span>
+              <span>闭卷提取</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="stats-row" aria-label="地图概览">
+          <div class="stat-block">
+            <span class="stat-label">视觉页</span>
+            <strong class="stat-value" id="statPages">—</strong>
+            <span class="stat-note">可回跳的课件页面</span>
+          </div>
+          <div class="stat-block">
+            <span class="stat-label">知识单元</span>
+            <strong class="stat-value" id="statUnits">—</strong>
+            <span class="stat-note">按逻辑链聚合，而非逐页复制</span>
+          </div>
+          <div class="stat-block">
+            <span class="stat-label">课堂证据</span>
+            <strong class="stat-value" id="statEvidence">—</strong>
+            <span class="stat-note">页码、时间戳与来源标签</span>
+          </div>
+          <div class="stat-block stat-accent">
+            <span class="stat-label">当前焦点</span>
+            <strong class="stat-value stat-value-wide" id="statFocus">—</strong>
+            <span class="stat-note" id="statFocusNote">选择一页或一个单元开始</span>
+          </div>
+        </section>
+
+        <div class="content-grid">
+          <section class="panel source-panel" aria-labelledby="visualHeading">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">视觉来源</p>
+                <h2 id="visualHeading">课件页面</h2>
+              </div>
+              <span class="panel-counter" id="pageCounter">— / —</span>
+            </div>
+            <div class="slide-stage" id="slideStage">
+              <div class="empty-state compact">
+                <span class="empty-symbol" aria-hidden="true">□</span>
+                <strong>还没有视觉页面</strong>
+                <p>加载 lesson-map JSON，或先查看内置演示。</p>
+              </div>
+            </div>
+            <div class="slide-caption" id="slideCaption">
+              <span class="caption-page" id="slidePageLabel">P.—</span>
+              <span class="caption-title" id="slideTitle">等待页面</span>
+            </div>
+            <div class="page-strip-wrap">
+              <div class="page-strip" id="pageStrip" aria-label="页面导航"></div>
+            </div>
+            <div class="source-meta" id="sourceMeta"></div>
+          </section>
+
+          <section class="panel lesson-panel" aria-labelledby="lessonHeading">
+            <div class="panel-heading lesson-heading">
+              <div>
+                <p class="panel-kicker" id="lessonKicker">知识单元</p>
+                <h2 id="lessonHeading">等待课堂重建</h2>
+              </div>
+              <span class="priority-badge" id="lessonPriority">—</span>
+            </div>
+            <div id="lessonBody">
+              <div class="empty-state">
+                <span class="empty-symbol" aria-hidden="true">✦</span>
+                <strong>尚未生成知识单元</strong>
+                <p>地图为空时不会编造教学结论。请加载一个包含 <code>units</code> 的 JSON。</p>
+              </div>
+            </div>
+            <div class="claims-section" aria-labelledby="claimsHeading">
+              <div class="subsection-heading">
+                <h3 id="claimsHeading">关键主张</h3>
+                <span id="claimsCount">0 条</span>
+              </div>
+              <div class="claims-list" id="claimsList"></div>
+            </div>
+          </section>
+
+          <aside class="panel evidence-panel" aria-labelledby="evidenceHeading">
+            <div class="panel-heading">
+              <div>
+                <p class="panel-kicker">可追溯性</p>
+                <h2 id="evidenceHeading">来源证据</h2>
+              </div>
+              <span class="evidence-score" id="evidenceScore">—</span>
+            </div>
+            <div class="coverage-block">
+              <div class="coverage-labels">
+                <span>当前单元覆盖</span>
+                <strong id="coverageLabel">—</strong>
+              </div>
+              <div class="coverage-track"><span id="coverageBar"></span></div>
+              <p class="coverage-note" id="coverageNote">选择一个知识单元查看其证据。</p>
+            </div>
+            <div class="evidence-list" id="evidenceList">
+              <div class="empty-state compact">
+                <span class="empty-symbol" aria-hidden="true">⌁</span>
+                <strong>暂无证据</strong>
+                <p>每条主张都应能回到页面或课堂片段。</p>
+              </div>
+            </div>
+            <div class="legend" aria-label="来源标签说明">
+              <span><i class="legend-dot material"></i>材料</span>
+              <span><i class="legend-dot teacher"></i>教师</span>
+              <span><i class="legend-dot inference"></i>补链</span>
+              <span><i class="legend-dot pending"></i>待确认</span>
+            </div>
+          </aside>
+        </div>
+
+        <section class="panel timeline-panel" aria-labelledby="timelineHeading">
+          <div class="panel-heading timeline-heading">
+            <div>
+              <p class="panel-kicker">听觉来源</p>
+              <h2 id="timelineHeading">课堂时间轴</h2>
+            </div>
+            <div class="timeline-meta">
+              <span id="segmentLabel">未选择片段</span>
+              <button class="text-button" id="clearSelection" type="button">清除焦点</button>
+            </div>
+          </div>
+          <div class="timeline-empty" id="timelineEmpty">
+            <span class="empty-symbol" aria-hidden="true">◌</span>
+            <div>
+              <strong>没有带时间戳的课堂片段</strong>
+              <p>可以先使用普通转写生成讲义；加入 SRT、VTT 或带时间戳的 JSON 后，这里会出现可回跳时间轴。</p>
+            </div>
+          </div>
+          <div class="timeline-scroll" id="timelineScroll" hidden>
+            <div class="timeline-ruler" id="timelineRuler"></div>
+            <div class="timeline-track" id="timelineTrack"></div>
+            <div class="timeline-cards" id="timelineCards"></div>
+          </div>
+        </section>
+
+        <section class="empty-project" id="emptyProject" hidden>
+          <div class="empty-project-mark" aria-hidden="true">+</div>
+          <h2>这是一个空的课堂地图</h2>
+          <p>把课件、教材和教师转写整理成一个 lesson-map JSON，再从右上角加载。字段不完整时，界面会保留缺失提示，不会伪造证据。</p>
+          <button class="outline-button" id="emptyLoadDemo" type="button">载入演示地图</button>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>本地演示 · 原始材料只读</span>
+        <span>证据标签优先于流畅叙述</span>
+      </footer>
+    </div>
+  </body>
+</html>

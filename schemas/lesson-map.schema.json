@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multimodal-study-tutor.dev/schemas/lesson-map.schema.json",
+  "title": "Multimodal Study Tutor lesson map",
+  "description": "Portable, source-traceable representation of visual material, speech, knowledge units and review items.",
+  "type": "object",
+  "required": ["schema_version", "subject", "profile"],
+  "properties": {
+    "schema_version": {"type": "string", "minLength": 1},
+    "map_kind": {"type": "string", "minLength": 1},
+    "subject": {"type": "string", "minLength": 1},
+    "profile": {"type": "string", "minLength": 1},
+    "lesson_id": {"$ref": "#/$defs/id"},
+    "chapter_id": {"$ref": "#/$defs/id"},
+    "title": {"type": "string"},
+    "theme": {"type": "string"},
+    "source": {"type": "object"},
+    "sources": {"type": "array", "items": {"$ref": "#/$defs/sourceAsset"}},
+    "source_assets": {"type": "array", "items": {"$ref": "#/$defs/sourceAsset"}},
+    "source_manifest": {"type": "array", "items": {"$ref": "#/$defs/sourceAsset"}},
+    "pages": {"type": "array", "items": {"$ref": "#/$defs/visualFrame"}},
+    "visual_sources": {"type": "array", "items": {"$ref": "#/$defs/visualFrame"}},
+    "visual_frames": {"type": "array", "items": {"$ref": "#/$defs/visualFrame"}},
+    "speech_segments": {"type": "array", "items": {"$ref": "#/$defs/speechSegment"}},
+    "media_segments": {"type": "array", "items": {"$ref": "#/$defs/speechSegment"}},
+    "audio_segments": {"type": "array", "items": {"$ref": "#/$defs/speechSegment"}},
+    "alignments": {"type": "array", "items": {"$ref": "#/$defs/alignment"}},
+    "units": {"type": "array", "items": {"$ref": "#/$defs/knowledgeUnit"}},
+    "knowledge_units": {"type": "array", "items": {"$ref": "#/$defs/knowledgeUnit"}},
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/claim"}},
+    "review_items": {"type": "array", "items": {"$ref": "#/$defs/reviewItem"}},
+    "reviews": {"type": "array", "items": {"$ref": "#/$defs/reviewItem"}},
+    "lessons": {"type": "array", "items": {"$ref": "#/$defs/lesson"}},
+    "assessment_evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "chapter_index": {"type": "array", "items": {"type": "object"}},
+    "notes": {"type": ["object", "string"]},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\s/\\\\]+(?:[/:@._-][^\\s/\\\\]+)*$"
+    },
+    "levelU": {"enum": ["U0", "U1", "U2", "U3"]},
+    "levelE": {"enum": ["E-", "E0", "E1", "E2", "E3"]},
+    "time": {"type": ["string", "number"]},
+    "sourceAsset": {
+      "type": "object",
+      "required": ["kind"],
+      "anyOf": [{"required": ["source_id"]}, {"required": ["id"]}],
+      "properties": {
+        "source_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "path": {"type": "string"},
+        "portable_path": {"type": "string"},
+        "format": {"type": "string"},
+        "read_only": {"type": "boolean"},
+        "sha256": {"type": "string"},
+        "page_count": {"type": "integer", "minimum": 0},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "visualFrame": {
+      "type": "object",
+      "anyOf": [{"required": ["visual_id"]}, {"required": ["page_id"]}, {"required": ["slide_id"]}, {"required": ["id"]}],
+      "properties": {
+        "visual_id": {"$ref": "#/$defs/id"},
+        "page_id": {"$ref": "#/$defs/id"},
+        "slide_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "source_id": {"$ref": "#/$defs/id"},
+        "page": {"type": ["integer", "string"], "minimum": 1},
+        "source_page": {"type": ["integer", "string"], "minimum": 1},
+        "title": {"type": "string"},
+        "status": {"type": "string"},
+        "alignment_status": {"type": "string"},
+        "source": {},
+        "image_path": {"type": "string"},
+        "text": {"type": "string"},
+        "time_anchor": {"type": "string"},
+        "time_anchor_seconds": {"type": "number", "minimum": 0},
+        "dimensions": {"type": "object"},
+        "metadata": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "alignment": {
+      "type": "object",
+      "properties": {
+        "alignment_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "visual_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "slide_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "unit_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "confidence": {"enum": ["high", "medium", "low", "unresolved"]},
+        "alignment_confidence": {"enum": ["high", "medium", "low", "unresolved"]},
+        "status": {"type": "string"},
+        "alignment_status": {"type": "string"},
+        "note": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "speechSegment": {
+      "type": "object",
+      "anyOf": [{"required": ["segment_id"]}, {"required": ["id"]}],
+      "properties": {
+        "segment_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "media_id": {"$ref": "#/$defs/id"},
+        "audio_id": {"$ref": "#/$defs/id"},
+        "source_id": {"$ref": "#/$defs/id"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "start_time": {"$ref": "#/$defs/time"},
+        "end_time": {"$ref": "#/$defs/time"},
+        "text": {"type": "string"},
+        "transcript": {"type": "string"},
+        "kind": {"type": "string"},
+        "status": {"type": "string"},
+        "confidence": {"type": "string"},
+        "alignment": {"$ref": "#/$defs/alignment"},
+        "unit_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+      },
+      "additionalProperties": true
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "source_id": {"$ref": "#/$defs/id"},
+        "quote": {"type": "string"},
+        "excerpt": {"type": "string"},
+        "page": {"type": ["integer", "string"]},
+        "section": {"type": "string"},
+        "start": {"$ref": "#/$defs/time"},
+        "end": {"$ref": "#/$defs/time"},
+        "timestamp": {"type": "string"},
+        "locator": {"type": "string"},
+        "document": {"type": "string"},
+        "verified": {"type": "boolean"},
+        "status": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "knowledgeUnit": {
+      "type": "object",
+      "anyOf": [{"required": ["unit_id"]}, {"required": ["id"]}],
+      "properties": {
+        "unit_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "title": {"type": "string"},
+        "unit_kind": {"type": "string"},
+        "visual_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "segment_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "claim_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "understanding_level": {"$ref": "#/$defs/levelU"},
+        "u_level": {"$ref": "#/$defs/levelU"},
+        "exam_evidence_level": {"$ref": "#/$defs/levelE"},
+        "e_level": {"$ref": "#/$defs/levelE"},
+        "logic_chain": {"type": "string"},
+        "representative_example": {"type": "string"},
+        "counterexample": {"type": "string"},
+        "learner_action": {"type": "string"},
+        "transfer_question": {"type": "string"},
+        "status": {"type": "string"},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "additionalProperties": true
+    },
+    "claim": {
+      "type": "object",
+      "required": ["text"],
+      "anyOf": [{"required": ["claim_id"]}, {"required": ["id"]}],
+      "properties": {
+        "claim_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "unit_id": {"$ref": "#/$defs/id"},
+        "text": {"type": "string", "minLength": 1},
+        "claim_type": {"type": "string"},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+        "evidence": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+        "source_labels": {"type": "array", "items": {"type": "string"}},
+        "visual_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "segment_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "understanding_level": {"$ref": "#/$defs/levelU"},
+        "exam_evidence_level": {"$ref": "#/$defs/levelE"},
+        "alignment_confidence": {"enum": ["high", "medium", "low", "unresolved"]},
+        "risk": {"type": "string"},
+        "status": {"type": "string"},
+        "assessment_evidence_id": {"$ref": "#/$defs/id"}
+      },
+      "additionalProperties": true,
+      "allOf": [
+        {
+          "if": {"properties": {"exam_evidence_level": {"enum": ["E3", "E-"]}}, "required": ["exam_evidence_level"]},
+          "then": {"anyOf": [{"required": ["sources"], "properties": {"sources": {"minItems": 1}}}, {"required": ["evidence"], "properties": {"evidence": {"minItems": 1}}}]}
+        }
+      ]
+    },
+    "reviewItem": {
+      "type": "object",
+      "anyOf": [{"required": ["review_id"]}, {"required": ["item_id"]}, {"required": ["id"]}],
+      "properties": {
+        "review_id": {"$ref": "#/$defs/id"},
+        "item_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "prompt": {"type": "string"},
+        "question": {"type": "string"},
+        "answer": {"type": "string"},
+        "answer_hidden": {"type": "boolean"},
+        "item_kind": {"type": "string"},
+        "unit_id": {"$ref": "#/$defs/id"},
+        "claim_id": {"$ref": "#/$defs/id"}
+      },
+      "additionalProperties": true
+    },
+    "lesson": {
+      "type": "object",
+      "anyOf": [{"required": ["lesson_id"]}, {"required": ["id"]}],
+      "properties": {
+        "lesson_id": {"$ref": "#/$defs/id"},
+        "id": {"$ref": "#/$defs/id"},
+        "title": {"type": "string"},
+        "date": {"type": "string"},
+        "subject": {"type": "string"},
+        "profile": {"type": "string"},
+        "visual_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "segment_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "unit_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "claim_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "source_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+      },
+      "additionalProperties": true
+    }
+  }
+}
