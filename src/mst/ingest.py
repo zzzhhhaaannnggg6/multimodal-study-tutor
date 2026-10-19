@@ -11,7 +11,7 @@ import mimetypes
 from pathlib import Path
 from typing import Iterable
 
-from .io import project_paths, write_json
+from .io import project_paths, read_json, write_json
 
 SUPPORTED_EXTENSIONS = {
     ".pptx": "slides",
@@ -113,3 +113,43 @@ def ingest_project(project_dir: str | Path, inputs: Iterable[str | Path]) -> dic
     manifest["source_manifest"] = rows
     write_json(paths["manifest"], manifest)
     return manifest
+
+
+def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
+    """Add provider-generated timestamped segments for local audio/video files."""
+
+    paths = project_paths(project_dir)
+    manifest = read_json(paths["manifest"])
+    map_path = paths["lesson_map"]
+    if not map_path.exists():
+        raise FileNotFoundError(f"lesson map does not exist: {map_path}; run study build first")
+    data = read_json(map_path)
+    existing = {str(item.get("segment_id")) for item in data.get("speech_segments", []) if isinstance(item, dict)}
+    segments = list(data.get("speech_segments", []))
+    added = 0
+    transcribe = getattr(provider, "transcribe", None)
+    if not callable(transcribe):
+        raise TypeError("speech provider must implement transcribe(audio_path)")
+    for source in manifest.get("source_manifest", []):
+        if source.get("kind") not in {"audio", "video"}:
+            continue
+        source_path = source.get("path")
+        if not source_path:
+            continue
+        rows = transcribe(str(source_path))
+        for index, row in enumerate(rows, 1):
+            if not isinstance(row, dict):
+                continue
+            segment_id = str(row.get("segment_id") or f"{source.get('source_id', 'audio')}::s{index:04d}")
+            if segment_id in existing:
+                continue
+            segment = dict(row)
+            segment.update({"segment_id": segment_id, "source_id": source.get("source_id"), "media_id": source.get("source_id"), "kind": "lecture", "status": row.get("status", "pending")})
+            segments.append(segment)
+            existing.add(segment_id)
+            added += 1
+    data["speech_segments"] = segments
+    data["media_segments"] = segments
+    data["audio_segments"] = segments
+    write_json(map_path, data)
+    return added

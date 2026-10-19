@@ -41,5 +41,7 @@ def project_paths(project_dir: str | Path) -> dict[str, Path]:
         "sources": root / "sources",
         "derived": root / "derived",
         "lesson_map": root / "derived" / "lesson-map.json",
+        "study_guide": root / "derived" / "study-guide.json",
+        "generation_report": root / "derived" / "generation-report.json",
         "exports": root / "exports",
     }

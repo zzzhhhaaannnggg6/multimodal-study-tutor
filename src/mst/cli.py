@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 
 from .agent import StudyAgent
-from .export import export_markdown
-from .ingest import ingest_project, init_project
+from .export import export_markdown, export_study_guide
+from .guide import generate_project_guide, validate_study_guide
+from .ingest import ingest_project, init_project, transcribe_project_audio
 from .io import project_paths, read_json
 from .models import LessonMap
 from .profiles import list_profiles
@@ -35,16 +36,29 @@ def _parser() -> argparse.ArgumentParser:
     build = sub.add_parser("build", help="create a provenance scaffold")
     build.add_argument("project", type=Path)
 
+    generate = sub.add_parser("generate", help="generate a student-facing self-study guide")
+    generate.add_argument("project", type=Path)
+    generate.add_argument("--provider", choices=("none", "mock", "openai"), default="none")
+    generate.add_argument("--model", default="gpt-5-mini")
+    generate.add_argument("--speech-provider", choices=("none", "openai"), default="none")
+    generate.add_argument("--speech-model", default="gpt-4o-transcribe")
+    generate.add_argument("--strict", action="store_true", help="fail if the guide is incomplete")
+
     validate = sub.add_parser("validate", help="validate a lesson-map JSON")
     validate.add_argument("map", type=Path, nargs="?", default=None)
     validate.add_argument("--project", type=Path, default=None)
     validate.add_argument("--strict", action="store_true")
 
+    validate_guide = sub.add_parser("validate-guide", help="validate a student study-guide JSON")
+    validate_guide.add_argument("map", type=Path)
+    validate_guide.add_argument("--strict", action="store_true")
+
     export = sub.add_parser("export", help="export a Markdown study note")
     export.add_argument("project", type=Path)
     export.add_argument("--output", type=Path)
+    export.add_argument("--format", choices=("md", "html", "json"), default="md")
 
-    serve = sub.add_parser("serve", help="serve the local timeline demo")
+    serve = sub.add_parser("serve", help="serve the local student study route")
     serve.add_argument("project", type=Path)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8765)
@@ -74,17 +88,52 @@ def main(argv: list[str] | None = None) -> int:
         data = build_scaffold(args.project)
         print(f"Built scaffold with {len(data['pages'])} visual source(s)")
         return 0
+    if args.command == "generate":
+        provider = None
+        if args.speech_provider == "openai":
+            from .providers import OpenAISpeechProvider
+
+            added = transcribe_project_audio(args.project, OpenAISpeechProvider(args.speech_model))
+            print(f"Transcribed {added} audio segment(s)")
+        if args.provider == "mock":
+            from .providers import MockProvider
+
+            provider = MockProvider()
+        elif args.provider == "openai":
+            from .providers import OpenAIProvider
+
+            provider = OpenAIProvider(args.model)
+        guide = generate_project_guide(args.project, provider)
+        report = validate_study_guide(guide, strict=args.strict)
+        print(f"Generated {guide.report.status} study guide: {len(guide.units)} unit(s)")
+        for item in report.diagnostics:
+            print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
+        print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        return 1 if report.errors and args.strict else 0
     if args.command == "validate":
         map_path = args.map or (project_paths(args.project)["lesson_map"] if args.project else None)
         if map_path is None:
             raise SystemExit("provide a map path or --project")
-        report = validate_lesson_map(read_json(map_path), strict=args.strict)
+        raw = read_json(map_path)
+        if isinstance(raw, dict) and raw.get("guide_kind") == "student-study-guide":
+            report = validate_study_guide(raw, strict=args.strict)
+        else:
+            report = validate_lesson_map(raw, strict=args.strict)
+        for item in report.diagnostics:
+            print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
+        print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        return 1 if report.errors else 0
+    if args.command == "validate-guide":
+        report = validate_study_guide(read_json(args.map), strict=args.strict)
         for item in report.diagnostics:
             print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
         return 1 if report.errors else 0
     if args.command == "export":
-        target = export_markdown(args.project, args.output)
+        if args.format == "md" and not project_paths(args.project)["study_guide"].exists():
+            target = export_markdown(args.project, args.output)
+        else:
+            target = export_study_guide(args.project, args.output, format=args.format)
         print(f"Wrote {target}")
         return 0
     if args.command == "serve":

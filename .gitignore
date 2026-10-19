@@ -42,6 +42,9 @@ MANIFEST
 /workspace/
 /private-data/
 /local-data/
+/derived/
+/exports/
+/sources/
 /recordings/
 /transcripts/
 /screenshots/

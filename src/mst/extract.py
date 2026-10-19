@@ -188,6 +188,21 @@ def extract_source(path: str | Path, kind: str | None = None) -> tuple[list[Visu
     suffix = source.suffix.lower()
     if suffix == ".docx":
         return [], extract_docx_transcript(source)
+    if suffix == ".txt":
+        text = source.read_text(encoding="utf-8-sig", errors="replace").strip()
+        if not text:
+            return [], []
+        return [], [
+            SpeechSegment(
+                segment_id=f"{source.stem}::s0001",
+                source_id=source.stem,
+                media_id=source.stem,
+                text=text,
+                transcript=text,
+                status="pending",
+                notes="普通转写没有可靠时间戳；不能据此声称精确教师强调。",
+            )
+        ]
     if kind == "transcript" or suffix in {".srt", ".vtt"}:
         return [], parse_timestamped_text(source)
     if suffix == ".pptx":

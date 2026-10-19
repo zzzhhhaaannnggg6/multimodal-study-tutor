@@ -15,3 +15,14 @@ def test_parse_vtt_cues(tmp_path: Path) -> None:
     assert rows[0].start == 2.5
     assert rows[0].end == 5.0
     assert rows[1].text == "再看机制。"
+
+
+def test_plain_text_is_kept_as_untimed_speech(tmp_path: Path) -> None:
+    source = tmp_path / "lecture.txt"
+    source.write_text("普通转写没有可靠的时间戳。", encoding="utf-8")
+    from mst.extract import extract_source
+
+    _, rows = extract_source(source, "transcript")
+    assert len(rows) == 1
+    assert rows[0].start is None
+    assert rows[0].text.startswith("普通转写")

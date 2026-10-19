@@ -1,170 +1,117 @@
 (() => {
   "use strict";
 
-  const demoMap = {
-    schema_version: "1.0",
-    map_kind: "lesson-reconstruction",
-    subject: "generic",
-    profile: "generic",
-    title: "从证据到机制",
-    notes: { status: "demo", message: "公开脱敏演示地图" },
-    pages: [
-      { visual_id: "demo::p001", page: 1, title: "先看证据", status: "covered", text: "材料中直接可观察到什么？" },
-      { visual_id: "demo::p002", page: 2, title: "再补机制", status: "covered", text: "中间机制如何把证据连接到结果？" },
-      { visual_id: "demo::p003", page: 3, title: "最后做迁移", status: "covered", text: "条件变化时，结论是否仍成立？" }
-    ],
-    audio_segments: [
-      { segment_id: "demo::s001", start: 12, end: 28, text: "先确定材料中能直接观察到的事实，再补上中间机制。", status: "aligned", alignment: { visual_ids: ["demo::p001"], unit_ids: ["demo::u001"], status: "aligned", confidence: "high" } },
-      { segment_id: "demo::s002", start: 31, end: 52, text: "如果只记结论，不知道机制，换一个例子就容易失去方向。", status: "aligned", alignment: { visual_ids: ["demo::p002"], unit_ids: ["demo::u001"], status: "aligned", confidence: "high" } }
-    ],
-    units: [
-      { unit_id: "demo::u001", title: "从证据到机制", visual_ids: ["demo::p001", "demo::p002", "demo::p003"], segment_ids: ["demo::s001", "demo::s002"], understanding_level: "U3", exam_evidence_level: "E1", logic_chain: "观察证据 -> 识别机制 -> 检查结果", learner_action: "能在新例子中指出证据、机制和结果。", representative_example: "把一个新案例拆成可观察事实和解释步骤。", transfer_question: "如果中间机制改变，结论还成立吗？", status: "verified" }
-    ],
-    claims: [
-      { claim_id: "demo::c001", unit_id: "demo::u001", text: "解释不能跳过证据到结果之间的机制。", visual_ids: ["demo::p002"], segment_ids: ["demo::s001"], source_labels: ["材料·p.2", "课堂转述·00:12–00:28"], understanding_level: "U3", exam_evidence_level: "E1", status: "verified", sources: [{ kind: "material", ref: "demo::p002", page: 2, verified: true, status: "verified" }, { kind: "classroom_transcript", ref: "demo::s001@00:12–00:28", start: 12, end: 28, quote: "先确定材料中能直接观察到的事实，再补上中间机制。", verified: true, status: "verified" }] }
-    ],
-    review_items: [{ review_id: "demo::r001", unit_id: "demo::u001", prompt: "请用一句话说明为什么不能从证据直接跳到结论。", answer: "因为缺少机制，无法解释条件如何产生结果。", answer_hidden: true }]
+  const $ = (id) => document.getElementById(id);
+  const list = (value) => Array.isArray(value) ? value : value ? [value] : [];
+  const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
+  const lines = (value) => esc(value).replace(/\n/g, "<br>");
+
+  const demoGuide = {
+    guide_version: "1.0", guide_kind: "student-study-guide", title: "从证据到机制：一节可独立学习的示范课", subject: "generic", profile: "generic", language: "zh-CN",
+    route: { central_question: "为什么解释一个结论时，不能只说结论本身？", outcomes: ["指出材料中可以直接观察到的证据", "说明证据如何通过中间机制产生结果", "把这条链迁移到一个新案例"], prerequisites: ["能区分事实和解释"], chain: ["看见证据", "找出机制", "检查结果"], estimated_minutes: 18 },
+    units: [{ unit_id: "demo::u001", title: "从证据到机制", question: "解释为什么不能跳过中间机制？", one_sentence: "完整解释必须把证据、机制和结果连起来。", why: "只有这样，换一个条件或案例时，你才知道结论是否仍然成立。", prerequisites: ["能区分事实和解释"], visual_refs: ["demo::p001", "demo::p002"], material_explanation: "课件先提出问题，再要求沿步骤追踪机制。", teacher_increment: "老师提醒：先确定材料中能直接观察到的事实，再补上中间机制。", tutor_bridge: "证据是起点，机制说明‘为什么会这样’，结果是最后要解释的现象。", step_chain: ["列出可观察证据", "说明中间机制", "检查机制是否足以推出结果"], worked_examples: [{ title: "完整例题", question: "把一个新案例拆成证据、机制和结果。", setup: "先不要急着写结论。", steps: ["圈出材料直接给出的事实。", "写出事实如何导致结果的中间过程。", "检查换一个条件后，这个过程是否还成立。"], answer: "证据不能直接等同于结论；必须说明中间机制。", variation: "如果机制改变，重新检查结论。", complete: true }], misconceptions: [{ wrong: "只要结果和材料一致，解释就完整了。", correct: "还要说明证据到结果之间的机制。", correction: "把中间过程写成一步或几步可检查的关系。" }], practice_items: [{ practice_id: "demo::p001", prompt: "为什么不能从证据直接跳到结论？", kind: "retrieval", difficulty: "基础", answer: "因为缺少机制，无法说明条件如何产生结果。", explanation: "先写证据，再写机制，最后检查结果是否由机制推出。", unit_id: "demo::u001" }], priority_label: "必须掌握：理解主干", assessment_signal: "课堂强调，但尚不足以判断考试要求", source_refs: [{ kind: "material", label: "材料依据", ref: "demo::p002", page: 2, verified: true, status: "covered" }], status: "complete", internal_understanding_level: "U3", internal_assessment_level: "E1" }],
+    review_items: [{ practice_id: "demo::p001", prompt: "为什么不能从证据直接跳到结论？", answer: "因为缺少机制，无法说明条件如何产生结果。", explanation: "先写证据，再写机制，最后检查结果是否由机制推出。", unit_id: "demo::u001" }],
+    source_index: [{ kind: "material", label: "材料依据", ref: "demo::p001", page: 1, status: "covered", verified: true }],
+    generation_report: { status: "complete", provider: "demo", total_pages: 2, covered_pages: 2, total_segments: 2, aligned_segments: 2, unresolved_items: [], missing_fields: [], warnings: [] }, notes: []
   };
 
-  const state = { map: demoMap, mode: "understanding", pageIndex: 0, unitId: null, claimId: null, segmentId: null, sourceKind: "demo" };
-  const $ = (id) => document.getElementById(id);
-  const list = (value) => Array.isArray(value) ? value : [];
-  const pages = () => list(state.map.pages || state.map.visual_sources || state.map.visual_frames);
-  const segments = () => list(state.map.audio_segments || state.map.speech_segments || state.map.media_segments);
-  const units = () => list(state.map.units || state.map.knowledge_units);
-  const claims = () => list(state.map.claims);
-  const reviews = () => list(state.map.review_items || state.map.reviews);
-  const unitId = (unit) => unit && (unit.unit_id || unit.id);
-  const pageId = (page) => page && (page.visual_id || page.page_id || page.slide_id || page.id);
-  const segmentId = (segment) => segment && (segment.segment_id || segment.id);
-  const claimId = (claim) => claim && (claim.claim_id || claim.id);
-  const activeUnit = () => units().find((unit) => unitId(unit) === state.unitId) || units()[0];
-  const activePage = () => pages()[state.pageIndex] || pages()[0];
+  const state = { guide: demoGuide, view: "route", unitIndex: 0, sourceKind: "demo" };
+  const units = () => list(state.guide.units);
+  const activeUnit = () => units()[state.unitIndex] || units()[0];
 
-  function escapeHtml(value) {
-    return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char]));
-  }
-
-  function seconds(value) {
-    if (typeof value === "number") return value;
-    if (value == null || value === "") return null;
-    const parts = String(value).replace(",", ".").split(":").map(Number);
-    if (parts.some(Number.isNaN)) return null;
-    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    if (parts.length === 2) return parts[0] * 60 + parts[1];
-    return parts[0];
-  }
-
-  function clock(value) {
-    const total = seconds(value);
-    if (total == null) return "—";
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = Math.floor(total % 60);
-    return `${h ? `${String(h).padStart(2, "0")}:` : ""}${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-
-  function sourceType(evidence) {
-    const kind = String(evidence?.kind || "pending").toLowerCase();
-    if (kind.includes("teacher") || kind.includes("transcript") || kind.includes("audio")) return "teacher";
-    if (kind.includes("tutor") || kind.includes("synthesis") || kind.includes("inference")) return "inference";
-    if (kind.includes("material") || kind.includes("slide") || kind.includes("reading")) return "material";
-    return "pending";
-  }
-
-  function setStatus(label, kind = "demo") {
+  function setStatus(label, kind = "file") {
     $("sourceStatus").dataset.kind = kind;
     $("sourceStatusText").textContent = label;
   }
 
+  function sourceLocation(source) {
+    if (source.page !== undefined && source.page !== null) return `第 ${source.page} 页`;
+    if (source.start !== undefined && source.start !== null) return `${source.start}–${source.end ?? "?"}`;
+    return source.ref || "待定位";
+  }
+
   function render() {
-    const pageRows = pages();
+    const guide = state.guide;
+    const route = guide.route || {};
+    $("guideTitle").textContent = guide.title || "自学讲义";
+    $("heroCopy").textContent = guide.report?.status === "complete" ? "按路线学习每个知识单元。先理解，再用例题和练习检查自己。" : "这份讲义包含可追溯的学习草稿；带有待确认标记的内容需要复核。";
+    $("centralQuestion").textContent = route.central_question || "暂无课程问题";
+    $("estimatedTime").textContent = `${route.estimated_minutes || "—"} 分钟`;
+    $("outcomes").innerHTML = list(route.outcomes).map((item) => `<li>${lines(item)}</li>`).join("") || "<li>等待生成学习目标</li>";
+    $("prerequisites").innerHTML = list(route.prerequisites).map((item) => `<li>${lines(item)}</li>`).join("") || "<li>暂无额外先修要求</li>";
+    $("unitCount").textContent = `${units().length} 个知识单元`;
+    $("draftNotice").hidden = guide.report?.status === "complete";
+    $("draftText").textContent = (guide.report?.warnings || []).join("；") || "部分内容仍需模型或人工复核。";
+    renderRoute(); renderLearn(); renderReview(); renderSources(); switchView(state.view);
+  }
+
+  function renderRoute() {
+    $("routeCards").innerHTML = units().map((unit, index) => `<button class="unit-card" data-unit-index="${index}" type="button"><span class="unit-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${esc(unit.title)}</strong><small>${esc(unit.one_sentence || unit.question || "进入本知识点")}</small><em>${esc(unit.priority_label || "重点理解")}</em></span><span class="arrow">→</span></button>`).join("") || `<div class="empty">还没有知识单元。请先运行 <code>study generate</code>。</div>`;
+    document.querySelectorAll("[data-unit-index]").forEach((button) => button.addEventListener("click", () => { state.unitIndex = Number(button.dataset.unitIndex); state.view = "learn"; render(); }));
+    $("startLearning").onclick = () => { state.unitIndex = 0; state.view = "learn"; render(); };
+  }
+
+  function renderLearn() {
     const unit = activeUnit();
-    if (unit && !state.unitId) state.unitId = unitId(unit);
-    $("projectTitle").textContent = state.map.title || `${state.map.subject || "学习"} · 课堂地图`;
-    $("projectSummary").textContent = state.map.notes?.message || "课件是视觉主线，教师语音补充重点、逻辑与评价信号。";
-    $("statPages").textContent = pageRows.length;
-    $("statUnits").textContent = units().length;
-    $("statEvidence").textContent = claims().reduce((sum, claim) => sum + list(claim.sources || claim.evidence).length, 0);
-    $("statFocus").textContent = unit?.title || "等待选择";
-    $("statFocusNote").textContent = state.mode === "extraction" ? "先回答问题，再展开答案" : "选择页面、单元或时间片段";
-    renderPages(pageRows);
-    renderUnit(unit);
-    renderEvidence(unit);
-    renderTimeline();
-    document.querySelectorAll(".mode-button").forEach((button) => {
-      const active = button.dataset.mode === state.mode;
-      button.classList.toggle("is-active", active);
-      button.setAttribute("aria-pressed", String(active));
-    });
+    $("unitNav").innerHTML = units().map((item, index) => `<button class="nav-item ${index === state.unitIndex ? "is-active" : ""}" data-nav-index="${index}" type="button"><span>${index + 1}</span>${esc(item.title)}</button>`).join("");
+    document.querySelectorAll("[data-nav-index]").forEach((button) => button.addEventListener("click", () => { state.unitIndex = Number(button.dataset.navIndex); render(); }));
+    if (!unit) { $("lessonContent").innerHTML = `<div class="empty"><strong>还没有可讲解的知识单元</strong><p>先生成 study-guide.json。</p></div>`; return; }
+    const examples = list(unit.worked_examples).map((example) => `<section class="lesson-section example"><h3>完整例题</h3><p class="question"><strong>题目：</strong>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><strong>答案：</strong>${lines(example.answer)}</p><p class="variation"><strong>换一个条件：</strong>${lines(example.variation)}</p></section>`).join("");
+    const mistakes = list(unit.misconceptions).length ? `<section class="lesson-section"><h3>最容易错在哪里</h3><div class="mistake-table">${list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("")}</div></section>` : "";
+    const practices = list(unit.practice_items).map((item, index) => `<div class="practice"><p><strong>练习 ${index + 1}：</strong>${lines(item.prompt)}</p><details><summary>查看答案与解析</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p></details></div>`).join("");
+    $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.unitIndex + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label || "重点理解")}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="lesson-section"><h3>先回答：${esc(unit.question || "这个知识点要解决什么问题？")}</h3><p>${lines(unit.why)}</p>${unit.prerequisites?.length ? `<p class="small-note"><b>先修：</b>${unit.prerequisites.map(esc).join("；")}</p>` : ""}</section><section class="lesson-section"><h3>看材料</h3><p>${lines(unit.material_explanation)}</p></section><section class="lesson-section teacher"><h3>课堂补充</h3><p>${lines(unit.teacher_increment)}</p></section><section class="lesson-section bridge"><h3>把逻辑补完整</h3><p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol></section>${examples}${mistakes}<section class="lesson-section"><h3>现在自己回答</h3>${practices || "<p>暂无练习题。</p>"}</section><div class="unit-footer"><span><b>学习重点：</b>${esc(unit.priority_label || "重点理解")}</span><span><b>评价信息：</b>${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${renderSourceList(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" type="button" ${state.unitIndex === 0 ? "disabled" : ""}>← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.unitIndex === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
+    $("previousUnit").onclick = () => { if (state.unitIndex > 0) { state.unitIndex -= 1; render(); } };
+    $("nextUnit").onclick = () => { if (state.unitIndex < units().length - 1) { state.unitIndex += 1; render(); } else { state.view = "review"; render(); } };
   }
 
-  function renderPages(rows) {
-    const page = activePage();
-    $("pageCounter").textContent = rows.length ? `${state.pageIndex + 1} / ${rows.length}` : "— / —";
-    $("slideStage").innerHTML = page ? `<div class="slide-art"><span class="slide-number">PAGE ${escapeHtml(page.page ?? page.source_page ?? state.pageIndex + 1)}</span><div class="slide-title">${escapeHtml(page.title || "未命名页面")}</div><div class="slide-rule"></div><div class="slide-lines"><i></i><i></i><i></i></div><div class="slide-diagram"><span class="diagram-node">证据</span><span class="diagram-arrow"></span><span class="diagram-node">机制</span></div></div>` : `<div class="empty-state compact"><span class="empty-symbol">□</span><strong>还没有视觉页面</strong><p>加载 lesson-map JSON，或先查看内置演示。</p></div>`;
-    $("slidePageLabel").textContent = page ? `P.${page.page ?? page.source_page ?? state.pageIndex + 1}` : "P.—";
-    $("slideTitle").textContent = page?.title || "等待页面";
-    $("sourceMeta").innerHTML = page ? `<span><strong>页面状态</strong> ${escapeHtml(page.status || "待确认")}</span><span>${escapeHtml(page.text || page.note || "视觉内容已纳入课堂地图。")}</span>` : "";
-    $("pageStrip").innerHTML = rows.map((row, index) => `<button class="page-thumb ${index === state.pageIndex ? "is-active" : ""}" data-page-index="${index}" type="button"><span class="page-thumb-number">P.${escapeHtml(row.page ?? row.source_page ?? index + 1)}</span><span class="page-thumb-title">${escapeHtml(row.title || "未命名")}</span></button>`).join("");
-    document.querySelectorAll("[data-page-index]").forEach((button) => button.addEventListener("click", () => { state.pageIndex = Number(button.dataset.pageIndex); const row = rows[state.pageIndex]; const match = units().find((item) => list(item.visual_ids).includes(pageId(row))); if (match) state.unitId = unitId(match); render(); }));
+  function renderReview() {
+    const route = state.guide.route || {};
+    $("reviewChain").innerHTML = list(route.chain).map((item, index) => `<span><b>${index + 1}</b>${esc(item)}</span>`).join("");
+    $("reviewItems").innerHTML = list(state.guide.review_items).map((item, index) => `<article class="review-card card"><p class="eyebrow">复习题 ${index + 1}</p><h3>${lines(item.prompt)}</h3><details><summary>我已经回答，查看答案</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p><button class="link-button" data-review-unit="${esc(item.unit_id || "")}" type="button">回到对应知识点 →</button></details></article>`).join("") || `<div class="empty">暂无复习题。</div>`;
+    document.querySelectorAll("[data-review-unit]").forEach((button) => button.addEventListener("click", () => { const index = units().findIndex((unit) => unit.unit_id === button.dataset.reviewUnit); if (index >= 0) { state.unitIndex = index; state.view = "learn"; render(); } }));
   }
 
-  function renderUnit(unit) {
-    $("lessonKicker").textContent = state.mode === "extraction" ? "闭卷提取" : "知识单元";
-    $("lessonHeading").textContent = unit?.title || "等待课堂重建";
-    $("lessonPriority").textContent = unit ? `${unit.understanding_level || "U?"} · ${unit.exam_evidence_level || "E?"}` : "—";
-    if (!unit) { $("lessonBody").innerHTML = `<div class="empty-state"><span class="empty-symbol">✦</span><strong>尚未生成知识单元</strong><p>加载一个包含 <code>units</code> 的 JSON。</p></div>`; $("claimsList").innerHTML = ""; $("claimsCount").textContent = "0 条"; return; }
-    const chain = String(unit.logic_chain || "").split(/\s*(?:->|→)\s*/).filter(Boolean);
-    const relatedClaims = claims().filter((claim) => claim.unit_id === unitId(unit));
-    const review = reviews().find((item) => item.unit_id === unitId(unit));
-    const answer = state.mode === "extraction" ? `<p class="recall-answer">答案：${escapeHtml(review?.answer || unit.learner_action || "暂无独立答案")}</p>` : "";
-    $("lessonBody").innerHTML = state.mode === "extraction" ? `<div class="lesson-body"><div class="extraction-box"><h3>先提取，再核对</h3><p class="recall-prompt">${escapeHtml(review?.prompt || unit.transfer_question || "请复述这个知识单元的核心链条。")}</p>${answer}</div></div>` : `<div class="lesson-body"><p class="lesson-intro">${escapeHtml(unit.learner_action || unit.summary || "先把材料中的观察、机制和结果连起来。")}</p><div class="focus-callout"><b>学习动作</b> 先看页面，再用课堂语音补齐逻辑链。</div><div class="lesson-columns"><div class="lesson-block"><h3>逻辑链</h3><ol class="chain">${(chain.length ? chain : [unit.logic_chain || "等待逻辑链"]).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div><div class="lesson-block"><h3>例子 / 迁移</h3><p>${escapeHtml(unit.representative_example || unit.counterexample || unit.transfer_question || "暂无例子")}</p></div></div></div>`;
-    $("claimsCount").textContent = `${relatedClaims.length} 条`;
-    $("claimsList").innerHTML = relatedClaims.length ? relatedClaims.map((claim) => `<button class="claim-row ${claim.status === "pending" || claim.status === "unresolved" ? "pending" : ""} ${claimId(claim) === state.claimId ? "is-active" : ""}" data-claim-id="${escapeHtml(claimId(claim))}" type="button"><span class="claim-dot"></span><span class="claim-text">${escapeHtml(claim.text)}</span><span class="claim-meta">${escapeHtml(claim.exam_evidence_level || "E0")}</span></button>`).join("") : `<div class="empty-state compact"><strong>暂无主张</strong><p>生成课堂重建后，主张会在这里出现。</p></div>`;
-    document.querySelectorAll("[data-claim-id]").forEach((button) => button.addEventListener("click", () => { state.claimId = button.dataset.claimId; const claim = claims().find((item) => claimId(item) === state.claimId); const p = pages().findIndex((item) => list(claim?.visual_ids).includes(pageId(item))); if (p >= 0) state.pageIndex = p; render(); }));
+  function renderSourceList(rows) {
+    return rows.length ? `<ul>${rows.map((source) => `<li><span class="source-label">${esc(source.label || "来源")}</span><span>${esc(sourceLocation(source))}</span>${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`).join("")}</ul>` : "<p class=\"muted\">暂无可定位来源。</p>";
   }
 
-  function renderEvidence(unit) {
-    const related = claims().filter((claim) => claim.unit_id === unitId(unit));
-    const evidence = related.flatMap((claim) => list(claim.sources || claim.evidence).map((item) => ({ ...item, claim })));
-    const verified = evidence.filter((item) => item.verified || item.status === "verified").length;
-    const ratio = evidence.length ? Math.round(verified / evidence.length * 100) : 0;
-    $("evidenceScore").textContent = evidence.length ? `${ratio}%` : "—";
-    $("coverageLabel").textContent = evidence.length ? `${verified}/${evidence.length}` : "—";
-    $("coverageBar").style.width = `${ratio}%`;
-    $("coverageNote").textContent = evidence.length ? "已验证证据优先显示；待确认项不会被隐藏。" : "选择一个知识单元查看其证据。";
-    $("evidenceList").innerHTML = evidence.length ? evidence.map((item) => { const type = sourceType(item); return `<div class="evidence-group"><div class="evidence-row" data-evidence-ref="${escapeHtml(item.ref || item.source_id || "")}"><span class="evidence-type ${type}">${type === "teacher" ? "教师" : type === "inference" ? "补链" : type === "material" ? "材料" : "待定"}</span><span class="evidence-copy"><strong>${escapeHtml(item.quote || item.excerpt || item.ref || "未命名证据")}</strong><span>${escapeHtml(item.ref || item.source_id || item.locator || "定位待补充")} ${item.verified || item.status === "verified" ? "· 已核验" : "· 待确认"}</span></span></div></div>`; }).join("") : `<div class="empty-state compact"><span class="empty-symbol">⌁</span><strong>暂无证据</strong><p>每条主张都应能回到页面或课堂片段。</p></div>`;
+  function renderSources() {
+    const report = state.guide.report || {};
+    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>时间片段对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div>`;
+    $("sourceList").innerHTML = renderSourceList(list(state.guide.source_index));
   }
 
-  function renderTimeline() {
-    const rows = segments().filter((item) => seconds(item.start) != null || seconds(item.end) != null);
-    if (!rows.length) { $("timelineEmpty").hidden = false; $("timelineScroll").hidden = true; $("segmentLabel").textContent = "未选择片段"; return; }
-    $("timelineEmpty").hidden = true; $("timelineScroll").hidden = false;
-    const max = Math.max(...rows.map((item) => seconds(item.end) ?? seconds(item.start) ?? 0), 1);
-    const marks = 5;
-    $("timelineRuler").innerHTML = Array.from({ length: marks + 1 }, (_, index) => `<span class="ruler-mark" style="left:${index / marks * 100}%">${clock(max * index / marks)}</span>`).join("");
-    $("timelineTrack").innerHTML = rows.map((row) => { const start = seconds(row.start) ?? 0; const end = seconds(row.end) ?? start + 1; const left = start / max * 100; const width = Math.max((end - start) / max * 100, 1.2); return `<button class="timeline-segment ${segmentId(row) === state.segmentId ? "is-active" : ""}" style="left:${left}%;width:${width}%" data-segment-id="${escapeHtml(segmentId(row))}" title="${escapeHtml(row.text || "课堂片段")}" type="button"></button>`; }).join("");
-    $("timelineCards").style.setProperty("--segment-count", rows.length);
-    $("timelineCards").innerHTML = rows.map((row) => `<button class="timeline-card ${segmentId(row) === state.segmentId ? "is-active" : ""}" data-segment-card="${escapeHtml(segmentId(row))}" type="button"><time>${clock(row.start)}–${clock(row.end)}</time><strong>${escapeHtml(row.kind || "课堂片段")}</strong><p>${escapeHtml(row.text || "暂无转写文本")}</p></button>`).join("");
-    const selectSegment = (id) => { state.segmentId = id; const row = rows.find((item) => segmentId(item) === id); const match = units().find((item) => list(item.segment_ids).includes(id)); if (match) state.unitId = unitId(match); const p = pages().findIndex((item) => list(row?.alignment?.visual_ids).includes(pageId(item))); if (p >= 0) state.pageIndex = p; $("segmentLabel").textContent = row ? `${clock(row.start)} · ${row.text || "课堂片段"}` : "未选择片段"; render(); };
-    document.querySelectorAll("[data-segment-id]").forEach((button) => button.addEventListener("click", () => selectSegment(button.dataset.segmentId)));
-    document.querySelectorAll("[data-segment-card]").forEach((button) => button.addEventListener("click", () => selectSegment(button.dataset.segmentCard)));
+  function switchView(view) {
+    state.view = view;
+    ["route", "learn", "review"].forEach((name) => { $(`${name}View`).hidden = name !== view; });
+    document.querySelectorAll(".view-button").forEach((button) => button.classList.toggle("is-active", button.dataset.view === view));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function loadMap(map, kind = "file") {
-    if (!map || typeof map !== "object") throw new Error("lesson-map 必须是 JSON 对象");
-    state.map = map; state.pageIndex = 0; state.unitId = unitId(units()[0]); state.claimId = null; state.segmentId = null; state.sourceKind = kind;
-    setStatus(kind === "file" ? "本地 lesson-map" : "演示地图", kind); render();
+  function loadGuide(guide, kind = "file") {
+    if (!guide || typeof guide !== "object") throw new Error("讲义 JSON 必须是对象");
+    if (guide.guide_kind !== "student-study-guide") throw new Error("这不是 student-study-guide；请先运行 study generate");
+    state.guide = guide; state.unitIndex = 0; state.sourceKind = kind; setStatus(kind === "demo" ? "内置演示" : "本地讲义", kind); render();
   }
 
   async function boot() {
-    $("mapFile").addEventListener("change", (event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { loadMap(JSON.parse(reader.result), "file"); } catch (error) { setStatus(error.message, "error"); } }; reader.readAsText(file); });
-    $("resetDemo").addEventListener("click", () => loadMap(demoMap, "demo"));
-    $("emptyLoadDemo")?.addEventListener("click", () => loadMap(demoMap, "demo"));
-    $("clearSelection").addEventListener("click", () => { state.segmentId = null; state.claimId = null; $("segmentLabel").textContent = "未选择片段"; render(); });
-    document.querySelectorAll(".mode-button").forEach((button) => button.addEventListener("click", () => { state.mode = button.dataset.mode; render(); }));
-    try { const response = await fetch("lesson-map.json", { cache: "no-store" }); if (response.ok) loadMap(await response.json(), "file"); else throw new Error("no local map"); } catch (_) { loadMap(demoMap, "demo"); }
+    document.querySelectorAll(".view-button").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
+    $("guideFile").addEventListener("change", (event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { loadGuide(JSON.parse(reader.result), "file"); } catch (error) { setStatus(error.message, "error"); } }; reader.readAsText(file); });
+    $("generateButton").addEventListener("click", async () => {
+      const files = Array.from($("sourceFiles").files || []);
+      if (!files.length) { $("uploadMessage").textContent = "请先选择至少一个课件、转写或音频文件。"; return; }
+      $("generateButton").disabled = true; $("uploadMessage").textContent = "正在读取材料并生成学习草稿……";
+      try {
+        const payload = await Promise.all(files.map((file) => new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, data: String(reader.result).split(",")[1] || "" }); reader.onerror = reject; reader.readAsDataURL(file); })));
+        const response = await fetch("api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ files: payload }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "生成失败");
+        loadGuide(result.guide, "file");
+        $("uploadMessage").textContent = "已生成。你可以从学习路线开始。";
+      } catch (error) { $("uploadMessage").textContent = `生成失败：${error.message}。也可以先用命令 study generate。`; setStatus("生成失败", "error"); }
+      finally { $("generateButton").disabled = false; }
+    });
+    try { const response = await fetch("study-guide.json", { cache: "no-store" }); if (!response.ok) throw new Error("没有本地讲义"); loadGuide(await response.json(), "file"); } catch (_) { loadGuide(demoGuide, "demo"); }
   }
 
   boot();

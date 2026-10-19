@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.org/multimodal-study-tutor/study-guide.schema.json",
+  "title": "Student Study Guide",
+  "type": "object",
+  "required": ["guide_version", "guide_kind", "title", "route", "units", "review_items", "source_index", "generation_report"],
+  "properties": {
+    "guide_version": {"type": "string"},
+    "guide_kind": {"const": "student-study-guide"},
+    "lesson_id": {"type": ["string", "null"]},
+    "title": {"type": "string", "minLength": 1},
+    "subject": {"type": "string"},
+    "profile": {"type": "string"},
+    "language": {"type": "string"},
+    "route": {"$ref": "#/$defs/route"},
+    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}},
+    "review_items": {"type": "array", "items": {"$ref": "#/$defs/practice"}},
+    "source_index": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+    "generation_report": {"$ref": "#/$defs/report"},
+    "notes": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "route": {
+      "type": "object",
+      "required": ["central_question", "outcomes", "prerequisites", "chain", "estimated_minutes"],
+      "properties": {
+        "central_question": {"type": "string"},
+        "outcomes": {"type": "array", "items": {"type": "string"}},
+        "prerequisites": {"type": "array", "items": {"type": "string"}},
+        "chain": {"type": "array", "items": {"type": "string"}},
+        "estimated_minutes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["kind", "label", "ref"],
+      "properties": {
+        "kind": {"type": "string"},
+        "label": {"type": "string"},
+        "ref": {"type": "string"},
+        "page": {"type": ["integer", "string", "null"]},
+        "start": {},
+        "end": {},
+        "quote": {"type": ["string", "null"]},
+        "verified": {"type": "boolean"},
+        "status": {"type": "string"}
+      }
+    },
+    "example": {
+      "type": "object",
+      "required": ["title", "question", "steps", "answer", "complete"],
+      "properties": {
+        "title": {"type": "string"},
+        "question": {"type": "string"},
+        "setup": {"type": "string"},
+        "steps": {"type": "array", "items": {"type": "string"}},
+        "answer": {"type": "string"},
+        "variation": {"type": "string"},
+        "source_refs": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+        "complete": {"type": "boolean"}
+      }
+    },
+    "misconception": {
+      "type": "object",
+      "required": ["wrong", "correct"],
+      "properties": {
+        "wrong": {"type": "string"},
+        "correct": {"type": "string"},
+        "correction": {"type": "string"}
+      }
+    },
+    "practice": {
+      "type": "object",
+      "required": ["practice_id", "prompt", "answer", "explanation"],
+      "properties": {
+        "practice_id": {"type": "string"},
+        "prompt": {"type": "string"},
+        "kind": {"type": "string"},
+        "difficulty": {"type": "string"},
+        "answer": {"type": "string"},
+        "explanation": {"type": "string"},
+        "unit_id": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+      }
+    },
+    "unit": {
+      "type": "object",
+      "required": ["unit_id", "title", "question", "one_sentence", "why", "step_chain", "worked_examples", "practice_items", "source_refs"],
+      "properties": {
+        "unit_id": {"type": "string"},
+        "title": {"type": "string"},
+        "question": {"type": "string"},
+        "one_sentence": {"type": "string"},
+        "why": {"type": "string"},
+        "prerequisites": {"type": "array", "items": {"type": "string"}},
+        "visual_refs": {"type": "array", "items": {"type": "string"}},
+        "material_explanation": {"type": "string"},
+        "teacher_increment": {"type": "string"},
+        "tutor_bridge": {"type": "string"},
+        "step_chain": {"type": "array", "items": {"type": "string"}},
+        "worked_examples": {"type": "array", "items": {"$ref": "#/$defs/example"}},
+        "misconceptions": {"type": "array", "items": {"$ref": "#/$defs/misconception"}},
+        "practice_items": {"type": "array", "items": {"$ref": "#/$defs/practice"}},
+        "priority_label": {"type": "string"},
+        "assessment_signal": {"type": "string"},
+        "source_refs": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+        "status": {"type": "string"},
+        "internal_understanding_level": {"type": "string"},
+        "internal_assessment_level": {"type": "string"}
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": ["status", "provider", "total_pages", "covered_pages", "total_segments", "aligned_segments", "unresolved_items", "missing_fields", "warnings"],
+      "properties": {
+        "status": {"type": "string"},
+        "provider": {"type": "string"},
+        "total_pages": {"type": "integer", "minimum": 0},
+        "covered_pages": {"type": "integer", "minimum": 0},
+        "total_segments": {"type": "integer", "minimum": 0},
+        "aligned_segments": {"type": "integer", "minimum": 0},
+        "unresolved_items": {"type": "array", "items": {"type": "string"}},
+        "missing_fields": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

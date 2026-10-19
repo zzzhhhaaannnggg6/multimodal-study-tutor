@@ -8,15 +8,23 @@ validated offline.
 from .models import LessonMap
 from .profiles import StudyProfile, get_profile, list_profiles
 from .validation import Diagnostic, ValidationReport, validate_lesson_map
+from .guide import SourceRef, StudyGuide, generate_study_guide, validate_study_guide
+from .providers import SpeechProvider, TextModelProvider
 
 __all__ = [
     "Diagnostic",
     "LessonMap",
+    "StudyGuide",
+    "SpeechProvider",
+    "SourceRef",
+    "TextModelProvider",
     "StudyProfile",
     "ValidationReport",
     "get_profile",
     "list_profiles",
+    "generate_study_guide",
+    "validate_study_guide",
     "validate_lesson_map",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
