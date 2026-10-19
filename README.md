@@ -10,7 +10,7 @@
 
 - 无第三方运行时依赖的 lesson-map 数据模型和验证器；
 - `study` CLI：初始化项目、登记输入、生成 provenance scaffold、验证和导出；
-- 无依赖的 VTT/SRT、DOCX 段落、PPTX 文本页和 Markdown 阅读片段提取；
+- 无依赖的 VTT/SRT、DOCX 段落、PPTX/PDF 文本页和 Markdown 阅读片段提取；
 - Provider-neutral Agent API，以及可选的 OpenAI 适配器；
 - 学生讲义层：学习路线、知识单元精讲、完整例题、易错点、练习和答案；
 - 原生 HTML/CSS/JS 的学习路线与闭卷复习界面；

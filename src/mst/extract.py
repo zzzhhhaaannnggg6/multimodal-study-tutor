@@ -7,6 +7,7 @@ not infer teaching importance, align speech to slides, or manufacture quotes.
 from __future__ import annotations
 
 import re
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Iterable
@@ -146,6 +147,45 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
     return pages
 
 
+def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
+    """Extract text pages from PDF when pypdf or pdftotext is available."""
+
+    source = Path(path)
+    texts: list[str] = []
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        texts = [(page.extract_text() or "").strip() for page in PdfReader(str(source)).pages]
+    except ImportError:
+        try:
+            result = subprocess.run(
+                ["pdftotext", "-layout", str(source), "-"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return []
+        texts = [item.strip() for item in result.stdout.split("\f")]
+    pages: list[VisualFrame] = []
+    for number, text in enumerate(texts, 1):
+        if not text:
+            continue
+        first_line = next((line.strip() for line in text.splitlines() if line.strip()), f"Page {number}")
+        pages.append(
+            VisualFrame(
+                visual_id=f"{source.stem}::p{number:03d}",
+                source_id=source.stem,
+                page=number,
+                title=first_line[:120],
+                text=text,
+                status="pending",
+                notes="PDF text extracted; figures and scanned text may require visual/OCR review.",
+            )
+        )
+    return pages
+
+
 def extract_markdown_pages(path: str | Path) -> list[VisualFrame]:
     """Treat Markdown headings as lightweight reading frames."""
 
@@ -207,6 +247,8 @@ def extract_source(path: str | Path, kind: str | None = None) -> tuple[list[Visu
         return [], parse_timestamped_text(source)
     if suffix == ".pptx":
         return extract_pptx_pages(source), []
+    if suffix == ".pdf":
+        return extract_pdf_pages(source), []
     if suffix in {".md", ".markdown"}:
         return extract_markdown_pages(source), []
     return [], []
