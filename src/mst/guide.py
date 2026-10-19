@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -452,6 +453,63 @@ def _unit_pages(unit: KnowledgeUnit, pages: Sequence[VisualFrame]) -> list[Visua
     return [item for item in pages if item.visual_id in ids]
 
 
+def _infer_units(pages: Sequence[VisualFrame], segments: Sequence[SpeechSegment]) -> list[KnowledgeUnit]:
+    """Create conservative page groups when no semantic unit map exists.
+
+    This keeps a large deck readable offline without pretending that page
+    boundaries are the teacher's conceptual boundaries.  A model can later
+    merge or split these temporary groups.
+    """
+
+    if not pages:
+        if not segments:
+            return []
+        return [
+            KnowledgeUnit(
+                unit_id="inferred::u001",
+                title="课堂转写主线（待拆分）",
+                segment_ids=[item.segment_id for item in segments],
+                understanding_level="U3",
+                exam_evidence_level="E0",
+                logic_chain="课堂问题 → 解释过程 → 应用结果",
+                learner_action="能够复述课堂主线，并把它应用到一个新情境。",
+                transfer_question="请把课堂主线迁移到一个新情境。",
+                status="draft",
+            )
+        ]
+    group_size = 1 if len(pages) <= 8 else max(2, math.ceil(len(pages) / 12))
+    groups: list[KnowledgeUnit] = []
+    for start in range(0, len(pages), group_size):
+        chunk = list(pages[start : start + group_size])
+        ids = {item.visual_id for item in chunk}
+        linked_segments = [
+            item.segment_id
+            for item in segments
+            if item.alignment and ids.intersection(item.alignment.visual_ids)
+        ]
+        first = chunk[0]
+        last = chunk[-1]
+        page_label = f"第 {first.page} 页" if first.page == last.page else f"第 {first.page}–{last.page} 页"
+        title = _text(first.title, f"材料片段 {page_label}")
+        if len(chunk) > 1:
+            title = f"{title}（{page_label}）"
+        groups.append(
+            KnowledgeUnit(
+                unit_id=f"inferred::u{len(groups) + 1:03d}",
+                title=title,
+                visual_ids=[item.visual_id for item in chunk],
+                segment_ids=linked_segments,
+                understanding_level="U3" if len(groups) == 0 else "U2",
+                exam_evidence_level="E0",
+                logic_chain="观察材料 → 识别对象或关系 → 检查结论",
+                learner_action="能够用自己的话解释这一组材料，并说明它在整节课中的作用。",
+                transfer_question="换一个相近案例时，哪一步需要重新检查？",
+                status="draft",
+            )
+        )
+    return groups
+
+
 def _make_example(unit: KnowledgeUnit, refs: list[GuideSourceRef]) -> WorkedExample:
     raw = _text(unit.representative_example or unit.counterexample)
     chain = _split_chain(unit.logic_chain)
@@ -558,21 +616,7 @@ def generate_study_guide(
     inferred_units = False
     if not source_units and (pages or segments):
         inferred_units = True
-        source_units = [
-            KnowledgeUnit(
-                unit_id="inferred::u001",
-                title=_text(pages[0].title if pages else segments[0].text, "从材料中提取的核心问题")[:80],
-                unit_kind="concept",
-                visual_ids=[item.visual_id for item in pages],
-                segment_ids=[item.segment_id for item in segments],
-                understanding_level="U3",
-                exam_evidence_level="E0",
-                logic_chain="问题 → 对象/概念 → 关系或过程 → 结果",
-                learner_action="能够用自己的话解释材料的核心问题，并把步骤应用到一个新例子。",
-                transfer_question="请把这条主线迁移到一个新情境。",
-                status="draft",
-            )
-        ]
+        source_units = _infer_units(pages, segments)
     units: list[LearningUnit] = []
     missing: list[str] = []
     warnings: list[str] = []
