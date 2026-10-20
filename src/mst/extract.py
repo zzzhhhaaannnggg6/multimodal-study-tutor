@@ -9,10 +9,12 @@ from __future__ import annotations
 import re
 import subprocess
 import zipfile
+from math import hypot
 from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
 
+from .multimodal import annotate_speech_metadata, visual_signals
 from .models import SpeechSegment, VisualFrame
 
 TIME_RANGE_RE = re.compile(
@@ -65,6 +67,7 @@ def parse_timestamped_text(path: str | Path) -> list[SpeechSegment]:
                 text=" ".join(text_lines),
                 transcript=" ".join(text_lines),
                 status="pending",
+                metadata=annotate_speech_metadata({}, " ".join(text_lines)),
             )
         )
         index += 1
@@ -106,9 +109,91 @@ def extract_docx_transcript(path: str | Path) -> list[SpeechSegment]:
                 transcript=paragraph,
                 status="pending",
                 notes="DOCX paragraph extracted; timestamp/end alignment requires review.",
+                metadata=annotate_speech_metadata({}, paragraph),
             )
         )
     return segments
+
+
+def _pptx_diagram_graph(root: ElementTree.Element) -> tuple[list[str], list[str]]:
+    """Read labelled PPTX nodes and connector endpoints when present.
+
+    PowerPoint stores connector endpoint IDs in ``a:stCxn``/``a:endCxn``.
+    When an exporter omits those IDs, the fallback uses the nearest two shape
+    centres and marks the result as an undirected candidate in the text.  It is
+    intentionally a review cue rather than a verified diagram interpretation.
+    """
+
+    p = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    node_rows: dict[str, dict[str, object]] = {}
+    for tag in ("sp", "graphicFrame", "pic"):
+        for element in root.findall(f".//{p}{tag}"):
+            props = element.find(f".//{p}cNvPr")
+            node_id = props.get("id") if props is not None else None
+            if not node_id:
+                continue
+            label = " ".join(
+                node.text.strip()
+                for node in element.iter(f"{a}t")
+                if node.text and node.text.strip()
+            )
+            xfrm = element.find(f".//{a}xfrm")
+            off = xfrm.find(f"{a}off") if xfrm is not None else None
+            ext = xfrm.find(f"{a}ext") if xfrm is not None else None
+            try:
+                x = float(off.get("x", "0")) if off is not None else 0.0
+                y = float(off.get("y", "0")) if off is not None else 0.0
+                cx = float(ext.get("cx", "0")) if ext is not None else 0.0
+                cy = float(ext.get("cy", "0")) if ext is not None else 0.0
+            except (TypeError, ValueError):
+                x = y = cx = cy = 0.0
+            node_rows[str(node_id)] = {
+                "label": label or f"节点 {node_id}",
+                "center": (x + cx / 2.0, y + cy / 2.0),
+            }
+
+    nodes = [str(row["label"]) for row in node_rows.values() if str(row["label"]).strip()]
+    edges: list[str] = []
+    for connector in root.findall(f".//{p}cxnSp"):
+        start = connector.find(f".//{a}stCxn")
+        end = connector.find(f".//{a}endCxn")
+        start_id = start.get("id") if start is not None else None
+        end_id = end.get("id") if end is not None else None
+        if start_id in node_rows and end_id in node_rows:
+            edges.append(f"{node_rows[start_id]['label']} → {node_rows[end_id]['label']}")
+            continue
+        xfrm = connector.find(f".//{a}xfrm")
+        off = xfrm.find(f"{a}off") if xfrm is not None else None
+        ext = xfrm.find(f"{a}ext") if xfrm is not None else None
+        try:
+            center = (
+                float(off.get("x", "0")) + (float(ext.get("cx", "0")) if ext is not None else 0.0) / 2.0,
+                float(off.get("y", "0")) + (float(ext.get("cy", "0")) if ext is not None else 0.0) / 2.0,
+            )
+        except (TypeError, ValueError):
+            center = (0.0, 0.0)
+        nearest = sorted(
+            (
+                (hypot(center[0] - row["center"][0], center[1] - row["center"][1]), row["label"])
+                for row in node_rows.values()
+            ),
+            key=lambda item: item[0],
+        )[:2]
+        if len(nearest) == 2:
+            edges.append(f"{nearest[0][1]} ↔ {nearest[1][1]}")
+    return nodes, _unique_graph_edges(edges)
+
+
+def _unique_graph_edges(edges: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for edge in edges:
+        edge = str(edge).strip()
+        if edge and edge not in seen:
+            result.append(edge)
+            seen.add(edge)
+    return result
 
 
 def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
@@ -117,6 +202,8 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
     source = Path(path)
     pages: list[VisualFrame] = []
     namespace = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    drawing_namespace = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    presentation_namespace = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
     with zipfile.ZipFile(source) as archive:
         slide_names = sorted(
             (
@@ -132,6 +219,25 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
                 for node in root.iter(f"{namespace}t")
                 if node.text and node.text.strip()
             )
+            shape_counts = {
+                "shape": len(root.findall(f".//{presentation_namespace}sp")),
+                "picture": len(root.findall(f".//{presentation_namespace}pic")),
+                "connector": len(root.findall(f".//{presentation_namespace}cxnSp")),
+                "graphic_frame": len(root.findall(f".//{presentation_namespace}graphicFrame")),
+            }
+            # A connector can be represented by a line shape in exported
+            # decks, so inspect drawing geometry as an additional cue.
+            line_count = len(root.findall(f".//{drawing_namespace}prstGeom[@prst='line']"))
+            shape_counts["line"] = line_count
+            diagram_nodes, diagram_edges = _pptx_diagram_graph(root)
+            signals = visual_signals(
+                text,
+                shape_counts=shape_counts,
+                image_count=shape_counts["picture"],
+                connector_count=shape_counts["connector"] + line_count,
+                diagram_nodes=diagram_nodes,
+                diagram_edges=diagram_edges,
+            )
             title = text.split(" ", 1)[0] if text else f"Slide {page_number}"
             pages.append(
                 VisualFrame(
@@ -141,7 +247,20 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
                     source_page=page_number,
                     title=title[:120],
                     text=text,
-                    status="pending",
+                    # Text extraction covers the reading channel.  A separate
+                    # visual-review flag records diagrams/screenshots that
+                    # still need image inspection.
+                    status="covered" if text else "unresolved",
+                    visual_kind=signals["kind"],
+                    visual_summary=signals["summary"],
+                    visual_evidence=[
+                        *signals["code_lines"][:3],
+                        *signals["formula_candidates"][:3],
+                        *signals["diagram_keywords"][:5],
+                        *signals["diagram_edges"][:3],
+                    ],
+                    needs_visual_review=signals["review_required"],
+                    metadata={"visual_analysis": signals},
                 )
             )
     return pages
@@ -169,9 +288,8 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
         texts = [item.strip() for item in result.stdout.split("\f")]
     pages: list[VisualFrame] = []
     for number, text in enumerate(texts, 1):
-        if not text:
-            continue
         first_line = next((line.strip() for line in text.splitlines() if line.strip()), f"Page {number}")
+        signals = visual_signals(text)
         pages.append(
             VisualFrame(
                 visual_id=f"{source.stem}::p{number:03d}",
@@ -179,8 +297,13 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
                 page=number,
                 title=first_line[:120],
                 text=text,
-                status="pending",
+                status="covered" if text else "unresolved",
                 notes="PDF text extracted; figures and scanned text may require visual/OCR review.",
+                visual_kind=signals["kind"],
+                visual_summary=signals["summary"],
+                visual_evidence=[*signals["formula_candidates"][:3], *signals["code_lines"][:3]],
+                needs_visual_review=True if signals["review_required"] else not bool(text.strip()),
+                metadata={"visual_analysis": signals},
             )
         )
     return pages
@@ -200,6 +323,7 @@ def extract_markdown_pages(path: str | Path) -> list[VisualFrame]:
             return
         number = len(frames) + 1
         text = " ".join(current_lines).strip()
+        signals = visual_signals(text)
         frames.append(
             VisualFrame(
                 visual_id=f"{source.stem}::p{number:03d}",
@@ -207,7 +331,12 @@ def extract_markdown_pages(path: str | Path) -> list[VisualFrame]:
                 page=number,
                 title=current_title or f"Section {number}",
                 text=text,
-                status="pending",
+                status="covered" if text else "unresolved",
+                visual_kind=signals["kind"],
+                visual_summary=signals["summary"],
+                visual_evidence=[*signals["formula_candidates"][:3], *signals["code_lines"][:3]],
+                needs_visual_review=signals["review_required"],
+                metadata={"visual_analysis": signals},
             )
         )
 
@@ -241,6 +370,7 @@ def extract_source(path: str | Path, kind: str | None = None) -> tuple[list[Visu
                 transcript=text,
                 status="pending",
                 notes="普通转写没有可靠时间戳；不能据此声称精确教师强调。",
+                metadata=annotate_speech_metadata({}, text),
             )
         ]
     if kind == "transcript" or suffix in {".srt", ".vtt"}:

@@ -11,10 +11,12 @@ from __future__ import annotations
 import html
 import json
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from .multimodal import classify_speech_text, speech_role_label
 from .io import project_paths, read_json, write_json
 from .models import Claim, Evidence, KnowledgeUnit, LessonMap, SpeechSegment, VisualFrame, coerce_lesson_map
 
@@ -90,21 +92,55 @@ def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
     excerpts = [_compact_excerpt(item.text) for item in pages if _text(item.text)]
     excerpts = _dedupe(excerpts)
     if not excerpts:
-        return "材料文字尚未提取；请先查看对应页面，下面的逻辑步骤属于导师补链。"
+        visual_notes = _dedupe(
+            item.visual_summary
+            for item in pages
+            if _text(getattr(item, "visual_summary", None))
+        )
+        message = "材料文字尚未提取；请先查看对应页面，下面的逻辑步骤属于导师补链。"
+        if visual_notes:
+            message += "\n材料视觉线索：" + "；".join(visual_notes[:2])
+        return message
     joined = "；".join(excerpts[:3])
-    return (
+    visual_notes = _dedupe(
+        item.visual_summary
+        for item in pages
+        if _text(getattr(item, "visual_summary", None))
+    )
+    evidence = _dedupe(
+        cue
+        for item in pages
+        for cue in getattr(item, "visual_evidence", [])
+        if _text(cue)
+    )
+    result = (
         f"材料先给出：{joined}\n"
         f"阅读动作：先圈出“{title}”涉及的对象、条件或符号，再对照下面的步骤，"
         "确认每一步在材料中对应什么。"
     )
+    if visual_notes:
+        result += "\n材料视觉线索：" + "；".join(visual_notes[:2])
+    if evidence:
+        result += "\n可先核对的图/式/代码线索：" + "；".join(evidence[:8])
+    if any(getattr(item, "needs_visual_review", False) for item in pages):
+        result += "\n【待确认】页面含图形、公式或截图，文字线索不能替代对原图的复核。"
+    return result
 
 
 def _teacher_reading(segments: Sequence[SpeechSegment]) -> str:
-    excerpts = [_compact_excerpt(item.text, 220) for item in segments if _text(item.text)]
-    excerpts = _dedupe(excerpts)
-    if not excerpts:
+    rows: list[str] = []
+    for item in segments:
+        text = _text(item.text or item.transcript)
+        if not text:
+            continue
+        metadata = item.metadata if isinstance(item.metadata, Mapping) else {}
+        analysis = metadata.get("speech_analysis") if isinstance(metadata.get("speech_analysis"), Mapping) else classify_speech_text(text)
+        role = _text(analysis.get("primary_role"), "general")
+        rows.append(f"【{speech_role_label(role)}】{_compact_excerpt(text, 220)}")
+    rows = _dedupe(rows)
+    if not rows:
         return "本节没有可定位的教师补充；下面标为“导师补链”的内容是为了帮助你把材料读通。"
-    return "课堂里可定位到的补充：" + "；".join(excerpts[:4])
+    return "课堂里的有效增量：" + "；".join(rows[:5])
 
 
 def _infer_topic_title(text: str, fallback: str) -> str:
@@ -613,6 +649,9 @@ class GenerationReport:
     covered_pages: int
     total_segments: int
     aligned_segments: int
+    visual_review_pages: int = 0
+    supplement_segments: int = 0
+    speech_role_counts: dict[str, int] = field(default_factory=dict)
     unresolved_items: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -629,6 +668,9 @@ class GenerationReport:
             covered_pages=int(value.get("covered_pages", 0)),
             total_segments=int(value.get("total_segments", 0)),
             aligned_segments=int(value.get("aligned_segments", 0)),
+            visual_review_pages=int(value.get("visual_review_pages", 0)),
+            supplement_segments=int(value.get("supplement_segments", 0)),
+            speech_role_counts={str(key): int(item) for key, item in dict(value.get("speech_role_counts", {}) or {}).items()},
             unresolved_items=[_text(item) for item in _list(value.get("unresolved_items"))],
             missing_fields=[_text(item) for item in _list(value.get("missing_fields"))],
             warnings=[_text(item) for item in _list(value.get("warnings"))],
@@ -1263,15 +1305,27 @@ def generate_study_guide(
     )
     review_items = [item for unit in units for item in unit.practice_items]
     aligned = sum(1 for item in segments if item.alignment and item.alignment.status in {"aligned", "covered", "verified"})
+    visual_review_pages = sum(1 for item in pages if getattr(item, "needs_visual_review", False))
+    supplement_segments = sum(1 for item in segments if item.alignment and item.alignment.status == "supplement")
+    speech_role_counts: Counter[str] = Counter()
+    for item in segments:
+        metadata = item.metadata if isinstance(item.metadata, Mapping) else {}
+        analysis = metadata.get("speech_analysis") if isinstance(metadata.get("speech_analysis"), Mapping) else classify_speech_text(item.text)
+        role = _text(analysis.get("primary_role"), "general")
+        speech_role_counts[role] += 1
     covered_pages = sum(1 for item in pages if item.status in {"covered", "verified", "merged"})
-    status = "complete" if provider is not None and units and not missing and not warnings else "draft"
     if not units:
-        status = "needs-content"
         warnings.append("lesson-map 没有可解析的页面或知识单元；当前只能生成输入骨架，不能声称完成课程讲解。")
     elif inferred_units:
         warnings.append("lesson-map 没有知识单元；已从页面建立一个待模型拆分的临时单元。")
     if units and provider is None:
         warnings.append("未提供文本模型；已生成可追溯教学草稿，例题和补链仍需模型或人工复核。")
+    if visual_review_pages:
+        warnings.append(f"{visual_review_pages} 个页面含图形、公式或截图；视觉结构尚未逐页复核。")
+    if not units:
+        status = "needs-content"
+    else:
+        status = "complete" if provider is not None and not missing and not warnings else "draft"
     report = GenerationReport(
         status=status,
         provider=getattr(provider, "name", "none") if provider is not None else "none",
@@ -1279,6 +1333,9 @@ def generate_study_guide(
         covered_pages=covered_pages,
         total_segments=len(segments),
         aligned_segments=aligned,
+        visual_review_pages=visual_review_pages,
+        supplement_segments=supplement_segments,
+        speech_role_counts=dict(speech_role_counts),
         unresolved_items=[item.visual_id for item in pages if item.status in {"pending", "unresolved"}],
         missing_fields=missing,
         warnings=warnings,
@@ -1335,6 +1392,24 @@ def validate_study_guide(value: StudyGuide | Mapping[str, Any] | str | Path, *, 
                 report.diagnostics.append(GuideDiagnostic("error", "practice.answer_missing", f"{path}.practice_items[{item_index}]", "练习必须有答案和解析"))
     if guide.report.status == "draft":
         report.diagnostics.append(GuideDiagnostic("warning", "guide.draft", "$.generation_report.status", "这是教学草稿，尚未通过完整讲义质量门槛"))
+    if guide.report.visual_review_pages:
+        report.diagnostics.append(
+            GuideDiagnostic(
+                "warning",
+                "visual.review_pending",
+                "$.generation_report.visual_review_pages",
+                f"{guide.report.visual_review_pages} 个页面的图形、公式或截图仍需视觉复核",
+            )
+        )
+    if guide.report.supplement_segments:
+        report.diagnostics.append(
+            GuideDiagnostic(
+                "warning",
+                "speech.supplement",
+                "$.generation_report.supplement_segments",
+                f"{guide.report.supplement_segments} 段课堂语音没有页面词汇锚点，已保留为课堂补充",
+            )
+        )
     return report
 
 
@@ -1404,7 +1479,16 @@ def render_markdown(guide: StudyGuide) -> str:
     lines.extend(["## 课后闭卷复习", "", "合上材料后，按学习顺序写出本节的主线：", "", " → ".join(guide.route.chain) or "暂无主线", ""])
     for index, item in enumerate(guide.review_items, 1):
         lines.extend([f"### 复习题 {index}", "", item.prompt, "", "<details><summary>查看答案</summary>", "", f"{item.answer}", "", item.explanation, "", "</details>", ""])
-    lines.extend(["## 来源与状态", "", f"- 页面覆盖：{guide.report.covered_pages}/{guide.report.total_pages}", f"- 时间片段对齐：{guide.report.aligned_segments}/{guide.report.total_segments}"])
+    lines.extend(
+        [
+            "## 来源与状态",
+            "",
+            f"- 页面文字覆盖：{guide.report.covered_pages}/{guide.report.total_pages}",
+            f"- 页面需要视觉复核：{guide.report.visual_review_pages}",
+            f"- 时间片段已对齐：{guide.report.aligned_segments}/{guide.report.total_segments}",
+            f"- 未找到页面锚点的课堂补充：{guide.report.supplement_segments}",
+        ]
+    )
     if guide.report.warnings:
         lines.append("- 需要复核：" + "；".join(guide.report.warnings))
     return "\n".join(lines).strip() + "\n"
@@ -1466,7 +1550,17 @@ def render_html(guide: StudyGuide) -> str:
             f"<section class=\"review\"><h3>复习题 {index}</h3><p>{esc(item.prompt)}</p>"
             f"<details><summary>我已经回答，查看答案</summary><p><strong>答案：</strong>{esc(item.answer)}</p><p><strong>解析：</strong>{esc(item.explanation)}</p></details></section>"
         )
-    body.append("<h2>来源与状态</h2><p>页面覆盖：%s/%s；时间片段对齐：%s/%s</p>" % (guide.report.covered_pages, guide.report.total_pages, guide.report.aligned_segments, guide.report.total_segments))
+    body.append(
+        "<h2>来源与状态</h2><p>页面文字覆盖：%s/%s；页面需要视觉复核：%s；时间片段已对齐：%s/%s；课堂补充：%s</p>"
+        % (
+            guide.report.covered_pages,
+            guide.report.total_pages,
+            guide.report.visual_review_pages,
+            guide.report.aligned_segments,
+            guide.report.total_segments,
+            guide.report.supplement_segments,
+        )
+    )
     css = """body{max-width:850px;margin:40px auto;padding:0 22px;font:16px/1.8 system-ui,-apple-system,'PingFang SC',sans-serif;color:#26352c;background:#fbfcf8}h1{line-height:1.25}h2{margin-top:2.3em;border-bottom:1px solid #dbe5dc;padding-bottom:.35em}h3{margin-top:1.4em;color:#315c43}.lead,.muted{color:#718078}.central{color:#2f6848;font-size:1.1em;font-weight:700}.draft{padding:10px 14px;border-left:4px solid #b28a37;background:#fff7df}.grip{padding:10px 14px;border-left:4px solid #c9684e;background:#fff5ef}.unit{margin-top:36px}.teacher{padding:10px 14px;border:1px solid #c9dfcf;background:#f3f9f4}.bridge{padding:10px 14px;border:1px solid #f0d4c8;background:#fffaf7}.example{padding:14px;border:1px solid #e3d4b5;background:#fffcf4}.mistakes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#dce6dd}.mistakes div{padding:9px;background:white}.mistakes b{color:#718078;font-size:.78em}.practice,.review{margin:10px 0;padding:12px 14px;border:1px solid #dce6dd;border-radius:7px;background:#fff}details{margin-top:8px;padding-top:8px;border-top:1px dashed #dce6dd}summary{color:#2f6848;cursor:pointer;font-weight:700}code{background:#eef3ee;padding:2px 4px}@media(max-width:600px){body{margin:22px auto;padding:0 15px}.mistakes{grid-template-columns:1fr}}"""
     return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + html.escape(guide.title) + f"</title><style>{css}</style></head><body>" + "\n".join(body) + "</body></html>"
 

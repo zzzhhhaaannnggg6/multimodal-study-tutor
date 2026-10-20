@@ -108,6 +108,11 @@ def main(argv: list[str] | None = None) -> int:
         guide = generate_project_guide(args.project, provider)
         report = validate_study_guide(guide, strict=args.strict)
         print(f"Generated {guide.report.status} study guide: {len(guide.units)} unit(s)")
+        print(
+            f"Pages {guide.report.covered_pages}/{guide.report.total_pages} text-covered; "
+            f"{guide.report.visual_review_pages} visual review pending; "
+            f"speech alignment {guide.report.aligned_segments}/{guide.report.total_segments}"
+        )
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
         if args.strict and (report.errors or guide.report.status != "complete"):
             return 1
@@ -138,6 +143,11 @@ def main(argv: list[str] | None = None) -> int:
         guide = generate_project_guide(args.project, provider)
         report = validate_study_guide(guide, strict=args.strict)
         print(f"Generated {guide.report.status} study guide: {len(guide.units)} unit(s)")
+        print(
+            f"Pages {guide.report.covered_pages}/{guide.report.total_pages} text-covered; "
+            f"{guide.report.visual_review_pages} visual review pending; "
+            f"speech alignment {guide.report.aligned_segments}/{guide.report.total_segments}"
+        )
         for item in report.diagnostics:
             print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")

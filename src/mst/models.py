@@ -261,6 +261,10 @@ class VisualFrame(ModelMixin):
     time_anchor_seconds: float | None = None
     alignment_status: str | None = None
     dimensions: dict[str, Any] = field(default_factory=dict)
+    visual_kind: str = "unknown"
+    visual_summary: str | None = None
+    visual_evidence: list[str] = field(default_factory=list)
+    needs_visual_review: bool = False
     notes: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     page_id: str | None = None
@@ -299,6 +303,10 @@ class VisualFrame(ModelMixin):
             time_anchor_seconds=_first(data, "time_anchor_seconds"),
             alignment_status=_first(data, "alignment_status", "status"),
             dimensions=dict(_first(data, "dimensions", default={}) or {}),
+            visual_kind=str(_first(data, "visual_kind", "kind", default="unknown")),
+            visual_summary=_first(data, "visual_summary", "summary"),
+            visual_evidence=[str(item) for item in _list(_first(data, "visual_evidence", "visual_cues"))],
+            needs_visual_review=bool(_first(data, "needs_visual_review", "visual_review_required", default=False)),
             notes=_first(data, "notes", "note"),
             metadata=dict(_first(data, "metadata", default={}) or {}),
             page_id=_first(data, "page_id"),

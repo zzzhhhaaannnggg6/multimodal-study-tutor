@@ -70,9 +70,11 @@
     $("unitCount").textContent = `${units().length} 个知识单元`;
     $("draftNotice").hidden = guide.report?.status === "complete";
     const warningCount = list(guide.report?.warnings).length;
-    $("draftText").textContent = warningCount
-      ? `已保留可定位来源；${warningCount} 项内容仍需要人工或模型复核。`
-      : "部分内容仍需要人工或模型复核。已确认来源会保留。";
+    const visualPending = Number(guide.report?.visual_review_pages || 0);
+    const supplementCount = Number(guide.report?.supplement_segments || 0);
+    $("draftText").textContent = warningCount || visualPending || supplementCount
+      ? `页面文字已读出；${visualPending} 页需要视觉复核，${supplementCount} 段语音保留为课堂补充。`
+      : "已保留可定位来源；当前没有待确认的视觉或语音结构。";
     const done = completionCount();
     const total = units().length;
     $("progressBar").style.width = total ? `${Math.round(done / total * 100)}%` : "0%";
@@ -126,7 +128,7 @@
 
   function renderSources() {
     const report = state.guide.report || {};
-    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>时间片段对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div>`;
+    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面文字覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>需要视觉复核</b><span>${report.visual_review_pages ?? 0} 页</span></div><div><b>时间片段已对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div><div><b>课堂补充片段</b><span>${report.supplement_segments ?? 0}</span></div>`;
     $("sourceList").innerHTML = renderSourceList(list(state.guide.source_index));
   }
 

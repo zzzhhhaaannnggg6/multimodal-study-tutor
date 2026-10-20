@@ -32,6 +32,25 @@ def test_ingest_and_scaffold_do_not_require_model(tmp_path: Path) -> None:
     assert project_paths(project)["lesson_map"].exists()
 
 
+def test_scaffold_records_visual_signals_and_speech_alignment(tmp_path: Path) -> None:
+    project = tmp_path / "multimodal-project"
+    init_project(project, "computer-systems")
+    slides = tmp_path / "slides.md"
+    slides.write_text("# 数据通路\nPC -> ALU -> 寄存器\naddi x5, x0, 10\n", encoding="utf-8")
+    transcript = tmp_path / "lecture.vtt"
+    transcript.write_text(
+        "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n"
+        "数据通路中 PC 经过 ALU 后写回寄存器。\n",
+        encoding="utf-8",
+    )
+    ingest_project(project, [slides, transcript])
+    data = build_scaffold(project)
+    assert data["pages"][0]["visual_kind"] in {"code", "diagram", "mixed"}
+    segment = data["speech_segments"][0]
+    assert segment["alignment"]["visual_ids"] == [data["pages"][0]["visual_id"]]
+    assert segment["metadata"]["speech_analysis"]["primary_role"] == "general"
+
+
 def test_agent_keeps_query_grounded() -> None:
     fixture = Path(__file__).parents[1] / "examples" / "minimal_course" / "lesson-map.json"
     agent = StudyAgent(LessonMap.from_json(fixture))

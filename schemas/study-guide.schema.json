@@ -119,6 +119,9 @@
         "covered_pages": {"type": "integer", "minimum": 0},
         "total_segments": {"type": "integer", "minimum": 0},
         "aligned_segments": {"type": "integer", "minimum": 0},
+        "visual_review_pages": {"type": "integer", "minimum": 0},
+        "supplement_segments": {"type": "integer", "minimum": 0},
+        "speech_role_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
         "unresolved_items": {"type": "array", "items": {"type": "string"}},
         "missing_fields": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}}

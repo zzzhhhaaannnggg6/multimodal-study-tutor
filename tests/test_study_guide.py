@@ -107,6 +107,31 @@ def test_computer_systems_offline_guide_uses_concrete_material_example() -> None
     assert len(unit.practice_items) == 3
 
 
+def test_visual_review_keeps_text_only_provider_output_as_draft() -> None:
+    lesson = LessonMap.from_dict(
+        {
+            "subject": "computer-systems",
+            "profile": "computer-systems",
+            "title": "含数据通路图的课",
+            "pages": [
+                {
+                    "visual_id": "slides::p001",
+                    "page": 1,
+                    "title": "数据通路",
+                    "status": "covered",
+                    "text": "PC -> ALU -> register",
+                    "visual_kind": "diagram",
+                    "visual_summary": "检测到流程/连接线索。",
+                    "needs_visual_review": True,
+                }
+            ],
+        }
+    )
+    guide = generate_study_guide(lesson, CompleteProvider())
+    assert guide.report.status == "draft"
+    assert any("视觉结构" in warning for warning in guide.report.warnings)
+
+
 def test_unit_sources_are_preserved_when_alignment_is_missing() -> None:
     lesson = LessonMap.from_dict(
         {

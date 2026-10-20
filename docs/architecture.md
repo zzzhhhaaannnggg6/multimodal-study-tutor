@@ -6,8 +6,9 @@ The repository is intentionally split into four layers:
    knowledge, evidence and review records. `mst.validation` rejects claims that
    cannot be traced back to a source.
 2. **Preparation** — `mst.ingest` records source metadata and hashes without
-   editing original files. Parsers for PPT/PDF/audio/transcript can be added
-   behind this boundary.
+   editing original files. `mst.extract` reads PPT/PDF/transcript content,
+   `mst.multimodal` records code/formula/diagram and speech-role signals, and
+   `mst.alignment` makes conservative page/time candidates with confidence.
 3. **Reconstruction** — `mst.reconstruct` creates the deterministic source
    scaffold. `mst.guide` then turns a map into a student-facing learning
    guide, while keeping all page/time references attached.
@@ -38,10 +39,15 @@ records missing teaching fields in `generation-report.json`; it never labels a
 draft as a complete course. With a provider, the same guide contract is used
 to enrich explanations, worked examples, misconceptions, and practice items.
 
-## Planned extensions
+## Current boundaries and next extensions
 
-- audio transcription adapters and page-image rendering for richer visual input;
-- alignment review UI with explicit jump-page and unresolved states;
-- profile registry for domain-specific terminology and practice strategies;
-- SQLite search index for larger courses;
-- MCP/Responses adapters over `StudyAgent` tools.
+The deterministic signal layer can detect structure in extracted text and PPTX
+shape XML, but it does not claim to read a screenshot, recognize an equation
+from pixels, or hear an audio file without a speech provider. Pages with images,
+formulas or connectors receive a visible visual-review flag; transcript
+segments without lexical anchors remain classroom supplements or unresolved.
+
+Next extensions are a rendered-page/vision adapter, a review screen for
+accepting or rejecting alignment candidates, profile-specific signal rules,
+SQLite search for larger courses, and MCP/Responses adapters over
+`StudyAgent` tools.

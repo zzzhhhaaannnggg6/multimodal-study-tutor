@@ -83,6 +83,10 @@
         "source": {},
         "image_path": {"type": "string"},
         "text": {"type": "string"},
+        "visual_kind": {"type": "string"},
+        "visual_summary": {"type": "string"},
+        "visual_evidence": {"type": "array", "items": {"type": "string"}},
+        "needs_visual_review": {"type": "boolean"},
         "time_anchor": {"type": "string"},
         "time_anchor_seconds": {"type": "number", "minimum": 0},
         "dimensions": {"type": "object"},
@@ -125,7 +129,8 @@
         "status": {"type": "string"},
         "confidence": {"type": "string"},
         "alignment": {"$ref": "#/$defs/alignment"},
-        "unit_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}}
+        "unit_ids": {"type": "array", "items": {"$ref": "#/$defs/id"}},
+        "metadata": {"type": "object"}
       },
       "additionalProperties": true
     },

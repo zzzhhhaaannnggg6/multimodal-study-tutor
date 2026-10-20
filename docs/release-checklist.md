@@ -16,6 +16,10 @@ Before publishing a project or example:
 - [ ] Check Markdown and standalone HTML keep answers collapsed until the
       learner asks to reveal them.
 - [ ] Confirm all `E3`/`E-` claims have a quote and a navigable locator.
+- [ ] Inspect pages marked as requiring visual review; confirm diagrams, formulas,
+      screenshots and code blocks are either reviewed or visibly left pending.
+- [ ] Inspect speech-role counts and alignment candidates; reject weak page
+      matches and keep genuine classroom supplements separate.
 - [ ] Search tracked text for `/Users/`, `/home/`, Windows user paths, API
       keys, teacher names, private transcript text, and unlicensed media.
 - [ ] Confirm raw PPT, DOCX, audio, screenshots and generated private outputs

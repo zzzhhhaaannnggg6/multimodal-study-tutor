@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .alignment import align_speech_to_visuals
 from .io import project_paths, read_json, write_json
 from .extract import extract_manifest_sources
 
@@ -22,6 +23,10 @@ def build_scaffold(project_dir: str | Path) -> dict[str, Any]:
     visuals = [item for item in sources if item.get("kind") in {"slides", "reading"}]
     speech = [item for item in sources if item.get("kind") in {"transcript", "audio"}]
     extracted_pages, extracted_segments = extract_manifest_sources(sources)
+    # Build conservative lexical candidates here so the map contains useful
+    # page/time relationships before an optional model or human review.  The
+    # alignment object records confidence and keeps weak candidates visible.
+    extracted_segments = align_speech_to_visuals(extracted_pages, extracted_segments)
     pages = [item.to_dict() for item in extracted_pages]
     audio_segments = [item.to_dict() for item in extracted_segments]
     # Unsupported formats still get a visible unresolved source frame so the
@@ -48,6 +53,7 @@ def build_scaffold(project_dir: str | Path) -> dict[str, Any]:
         "lessons": [],
         "pages": pages,
         "visual_sources": pages,
+        "speech_segments": audio_segments,
         "audio_segments": audio_segments,
         "media_segments": audio_segments,
         "units": [],

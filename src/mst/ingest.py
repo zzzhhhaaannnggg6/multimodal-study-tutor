@@ -11,7 +11,10 @@ import mimetypes
 from pathlib import Path
 from typing import Iterable
 
+from .alignment import align_speech_to_visuals
+from .multimodal import annotate_speech_metadata
 from .io import project_paths, read_json, write_json
+from .models import SpeechSegment, VisualFrame
 
 SUPPORTED_EXTENSIONS = {
     ".pptx": "slides",
@@ -144,12 +147,23 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
             if segment_id in existing:
                 continue
             segment = dict(row)
-            segment.update({"segment_id": segment_id, "source_id": source.get("source_id"), "media_id": source.get("source_id"), "kind": "lecture", "status": row.get("status", "pending")})
+            segment.update(
+                {
+                    "segment_id": segment_id,
+                    "source_id": source.get("source_id"),
+                    "media_id": source.get("source_id"),
+                    "kind": "lecture",
+                    "status": row.get("status", "pending"),
+                    "metadata": annotate_speech_metadata(row.get("metadata"), str(row.get("text", ""))),
+                }
+            )
             segments.append(segment)
             existing.add(segment_id)
             added += 1
-    data["speech_segments"] = segments
-    data["media_segments"] = segments
-    data["audio_segments"] = segments
+    pages = [VisualFrame.from_dict(item) for item in data.get("pages", data.get("visual_sources", [])) if isinstance(item, dict)]
+    aligned = align_speech_to_visuals(pages, [SpeechSegment.from_dict(item) for item in segments if isinstance(item, dict)])
+    data["speech_segments"] = [item.to_dict() for item in aligned]
+    data["media_segments"] = data["speech_segments"]
+    data["audio_segments"] = data["speech_segments"]
     write_json(map_path, data)
     return added
