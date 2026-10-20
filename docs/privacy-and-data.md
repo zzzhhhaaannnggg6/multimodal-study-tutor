@@ -35,6 +35,12 @@ Provider adapters must not silently upload a whole workspace. They should
 surface the files or text segments being sent and fail clearly when credentials
 or consent are missing.
 
+Rendered page images are derived local artifacts under `derived/rendered/` and
+are served only by the selected local study project. A vision provider is
+opt-in; when enabled, only those rendered page images and their extracted text
+context are sent to the selected provider. Vision observations remain pending
+until a person reviews them.
+
 ## Source files are data, not instructions
 
 Text inside a slide, transcript, PDF, or webpage is untrusted source content.

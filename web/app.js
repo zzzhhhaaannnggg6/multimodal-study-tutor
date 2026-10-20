@@ -122,9 +122,14 @@
     document.querySelectorAll("[data-review-unit]").forEach((button) => button.addEventListener("click", () => { const index = units().findIndex((unit) => unit.unit_id === button.dataset.reviewUnit); if (index >= 0) { state.unitIndex = index; state.view = "learn"; render(); } }));
   }
 
-  function renderSourceList(rows) {
-    return rows.length ? `<ul>${rows.map((source) => `<li><span class="source-label">${esc(source.label || "来源")}</span><span>${esc(sourceLocation(source))}</span>${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`).join("")}</ul>` : "<p class=\"muted\">暂无可定位来源。</p>";
-  }
+ function renderSourceList(rows) {
+    const imageLink = (source) => {
+      if (!source.image_path) return "";
+      const href = `/assets/${String(source.image_path).split("/").map(encodeURIComponent).join("/")}`;
+      return `<small><a href="${href}" target="_blank" rel="noopener">查看页面图像</a></small>`;
+    };
+    return rows.length ? `<ul>${rows.map((source) => `<li><span class="source-label">${esc(source.label || "来源")}</span><span>${esc(sourceLocation(source))}</span>${imageLink(source)}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`).join("")}</ul>` : "<p class=\"muted\">暂无可定位来源。</p>";
+ }
 
   function renderSources() {
     const report = state.guide.report || {};

@@ -10,11 +10,60 @@ from pathlib import Path
 from typing import Any
 
 from .alignment import align_speech_to_visuals
+from .render import render_visual_source
 from .io import project_paths, read_json, write_json
 from .extract import extract_manifest_sources
 
 
-def build_scaffold(project_dir: str | Path) -> dict[str, Any]:
+def inspect_project_visuals(project_dir: str | Path, provider: Any) -> int:
+    """Enrich rendered page records with optional vision-model observations."""
+
+    paths = project_paths(project_dir)
+    map_path = paths["lesson_map"]
+    data = read_json(map_path)
+    pages = data.get("pages", data.get("visual_sources", []))
+    inspected = 0
+    for page in pages:
+        if not isinstance(page, dict) or not page.get("image_path"):
+            continue
+        image_path = paths["root"] / str(page["image_path"])
+        if not image_path.is_file():
+            continue
+        try:
+            result = provider.analyze(str(image_path), context=str(page.get("text", "")))
+        except Exception as exc:  # preserve the map and make failure visible
+            page.setdefault("metadata", {})["vision_error"] = str(exc)
+            continue
+        if not isinstance(result, dict):
+            continue
+        metadata = dict(page.get("metadata") or {})
+        metadata["vision_analysis"] = result
+        page["metadata"] = metadata
+        if result.get("kind"):
+            page["visual_kind"] = str(result["kind"])
+        if result.get("summary"):
+            page["visual_summary"] = str(result["summary"])
+        evidence = []
+        for key in ("nodes", "edges", "formulas", "code"):
+            values = result.get(key, [])
+            if isinstance(values, list):
+                evidence.extend(str(item) for item in values if str(item).strip())
+        if evidence:
+            page["visual_evidence"] = evidence[:40]
+        # Model output remains unverified until a human accepts it.  A model
+        # cannot turn a page into a fully trusted source by itself.
+        page["needs_visual_review"] = True
+        inspected += 1
+    data["pages"] = pages
+    data["visual_sources"] = pages
+    notes = dict(data.get("notes") or {})
+    notes["vision_inspection"] = {"provider": getattr(provider, "name", "unknown"), "inspected_pages": inspected}
+    data["notes"] = notes
+    write_json(map_path, data)
+    return inspected
+
+
+def build_scaffold(project_dir: str | Path, *, render: bool = False) -> dict[str, Any]:
     paths = project_paths(project_dir)
     if not paths["manifest"].exists():
         raise FileNotFoundError(f"project manifest does not exist: {paths['manifest']}")
@@ -27,6 +76,29 @@ def build_scaffold(project_dir: str | Path) -> dict[str, Any]:
     # page/time relationships before an optional model or human review.  The
     # alignment object records confidence and keeps weak candidates visible.
     extracted_segments = align_speech_to_visuals(extracted_pages, extracted_segments)
+    render_notes: list[str] = []
+    rendered_count = 0
+    if render:
+        for source in visuals:
+            source_path = source.get("path")
+            source_id = str(source.get("source_id", "source"))
+            if not source_path:
+                continue
+            result = render_visual_source(source_path, paths["rendered"] / source_id)
+            render_notes.extend(result.warnings)
+            rendered_count += len(result.images)
+            by_page = {
+                int(item.page): item
+                for item in extracted_pages
+                if item.source_id == source_id and str(item.page).isdigit()
+            }
+            for index, image in enumerate(result.images, 1):
+                page = by_page.get(index)
+                if page is None:
+                    continue
+                page.image_path = str(image.relative_to(paths["root"].resolve()))
+                page.metadata = dict(page.metadata or {})
+                page.metadata["rendered_image"] = page.image_path
     pages = [item.to_dict() for item in extracted_pages]
     audio_segments = [item.to_dict() for item in extracted_segments]
     # Unsupported formats still get a visible unresolved source frame so the
@@ -63,6 +135,11 @@ def build_scaffold(project_dir: str | Path) -> dict[str, Any]:
         "notes": {
             "status": "scaffold",
             "message": "仅完成输入清点；请运行解析/对齐步骤后再生成教学主张。",
+            "rendering": {
+                "enabled": render,
+                "rendered_pages": rendered_count,
+                "warnings": render_notes,
+            },
         },
     }
     write_json(paths["lesson_map"], lesson_map)

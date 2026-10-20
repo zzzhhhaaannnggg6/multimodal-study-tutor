@@ -42,6 +42,7 @@
         "start": {},
         "end": {},
         "quote": {"type": ["string", "null"]},
+        "image_path": {"type": ["string", "null"]},
         "verified": {"type": "boolean"},
         "status": {"type": "string"}
       }

@@ -433,6 +433,7 @@ class GuideSourceRef:
     start: float | str | None = None
     end: float | str | None = None
     quote: str | None = None
+    image_path: str | None = None
     verified: bool = False
     status: str = "pending"
 
@@ -449,6 +450,7 @@ class GuideSourceRef:
             start=value.get("start"),
             end=value.get("end"),
             quote=value.get("quote"),
+            image_path=value.get("image_path"),
             verified=bool(value.get("verified", False)),
             status=_text(value.get("status"), "pending"),
         )
@@ -795,6 +797,7 @@ def _page_ref(page: VisualFrame) -> GuideSourceRef:
         ref=page.visual_id,
         page=page_number,
         quote=page.text,
+        image_path=page.image_path,
         verified=page.status in {"covered", "verified"},
         status=page.status,
     )
@@ -1419,6 +1422,8 @@ def _md_source(ref: GuideSourceRef) -> str:
         location = f"p.{ref.page}"
     elif ref.start is not None:
         location = f"{ref.start}–{ref.end or '?'}"
+    if ref.image_path:
+        location += f"；图像：{ref.image_path}"
     return f"`{ref.label}`（{location}）"
 
 

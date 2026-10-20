@@ -35,6 +35,7 @@ study init /tmp/my-lesson --subject generic
 study ingest /tmp/my-lesson examples/minimal_course
 study build /tmp/my-lesson
 study generate /tmp/my-lesson
+study generate /tmp/my-lesson --vision-provider openai
 study validate --project /tmp/my-lesson --strict
 study export /tmp/my-lesson --format md
 study serve /tmp/my-lesson
@@ -47,6 +48,11 @@ python -m http.server 8765 --directory web
 ```
 
 macOS 用户也可以双击仓库根目录的 `start-study.command`，选择项目文件夹后直接打开本地学习页面。
+
+`quickstart` 和 `build` 默认会尝试把 PPT/PDF 渲染到项目的
+`derived/rendered/`，供来源附录和视觉复核使用；使用 `--no-render` 可关闭。
+如果明确选择 `--vision-provider openai`，程序只上传已渲染的页面图像进行结构观察，
+结果仍标为待人工复核，不会自动变成教师观点或已核验公式。
 
 `examples/minimal_course` 中的 `.md` 和 `.vtt` 是合成材料，运行 `ingest`、
 `build` 和 `generate` 后会生成页面、时间段和学生讲义；它们不代表真实课程或教师。

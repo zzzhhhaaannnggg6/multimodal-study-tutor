@@ -14,7 +14,7 @@ from .ingest import ingest_project, init_project, transcribe_project_audio
 from .io import project_paths, read_json
 from .models import LessonMap
 from .profiles import list_profiles
-from .reconstruct import build_scaffold
+from .reconstruct import build_scaffold, inspect_project_visuals
 from .validation import validate_lesson_map
 
 
@@ -35,6 +35,9 @@ def _parser() -> argparse.ArgumentParser:
     quickstart.add_argument("--subject", default="generic")
     quickstart.add_argument("--provider", choices=("none", "mock", "openai"), default="none")
     quickstart.add_argument("--model", default="gpt-5-mini")
+    quickstart.add_argument("--render", action=argparse.BooleanOptionalAction, default=True, help="render PPT/PDF pages for visual review")
+    quickstart.add_argument("--vision-provider", choices=("none", "openai"), default="none")
+    quickstart.add_argument("--vision-model", default="gpt-5-mini")
     quickstart.add_argument("--strict", action="store_true")
 
     ingest = sub.add_parser("ingest", help="record input files without modifying them")
@@ -43,6 +46,7 @@ def _parser() -> argparse.ArgumentParser:
 
     build = sub.add_parser("build", help="create a provenance scaffold")
     build.add_argument("project", type=Path)
+    build.add_argument("--render", action=argparse.BooleanOptionalAction, default=True, help="render PPT/PDF pages for visual review")
 
     generate = sub.add_parser("generate", help="generate a student-facing self-study guide")
     generate.add_argument("project", type=Path)
@@ -51,6 +55,8 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--speech-provider", choices=("none", "openai"), default="none")
     generate.add_argument("--speech-model", default="gpt-4o-transcribe")
     generate.add_argument("--strict", action="store_true", help="fail if the guide is incomplete")
+    generate.add_argument("--vision-provider", choices=("none", "openai"), default="none")
+    generate.add_argument("--vision-model", default="gpt-5-mini")
 
     validate = sub.add_parser("validate", help="validate a lesson-map JSON")
     validate.add_argument("map", type=Path, nargs="?", default=None)
@@ -94,8 +100,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Initialized {args.project} ({manifest['profile']})")
         manifest = ingest_project(args.project, args.inputs)
         print(f"Recorded {len(manifest['source_manifest'])} source(s)")
-        data = build_scaffold(args.project)
+        data = build_scaffold(args.project, render=args.render)
         print(f"Built scaffold with {len(data['pages'])} visual source(s)")
+        if args.vision_provider == "openai":
+            from .providers import OpenAIVisionProvider
+
+            inspected = inspect_project_visuals(args.project, OpenAIVisionProvider(args.vision_model))
+            print(f"Inspected {inspected} rendered page image(s) with vision provider")
         provider = None
         if args.provider == "mock":
             from .providers import MockProvider
@@ -122,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Recorded {len(manifest['source_manifest'])} source(s)")
         return 0
     if args.command == "build":
-        data = build_scaffold(args.project)
+        data = build_scaffold(args.project, render=args.render)
         print(f"Built scaffold with {len(data['pages'])} visual source(s)")
         return 0
     if args.command == "generate":
@@ -132,6 +143,11 @@ def main(argv: list[str] | None = None) -> int:
 
             added = transcribe_project_audio(args.project, OpenAISpeechProvider(args.speech_model))
             print(f"Transcribed {added} audio segment(s)")
+        if args.vision_provider == "openai":
+            from .providers import OpenAIVisionProvider
+
+            inspected = inspect_project_visuals(args.project, OpenAIVisionProvider(args.vision_model))
+            print(f"Inspected {inspected} rendered page image(s) with vision provider")
         if args.provider == "mock":
             from .providers import MockProvider
 

@@ -8,6 +8,9 @@ core package and can be replaced by another provider without changing maps.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
+import mimetypes
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -29,6 +32,15 @@ class SpeechProvider(Protocol):
 
     def transcribe(self, audio_path: str) -> list[dict[str, Any]]:
         """Return dictionaries with text and, when available, start/end."""
+
+
+class VisionProvider(Protocol):
+    """Optional adapter that inspects one rendered page image."""
+
+    name: str
+
+    def analyze(self, image_path: str, *, context: str = "") -> dict[str, Any]:
+        """Return structured visual cues; never silently assert verification."""
 
 
 @dataclass
@@ -127,4 +139,68 @@ class OpenAISpeechProvider:
         return [{"segment_id": "speech::0001", "text": str(text), "status": "unresolved"}]
 
 
-__all__ = ["ModelProvider", "TextModelProvider", "SpeechProvider", "MockProvider", "OpenAIProvider", "OpenAISpeechProvider"]
+class OpenAIVisionProvider:
+    """Lazy OpenAI Responses adapter for rendered slide/page images."""
+
+    name = "openai-vision"
+
+    def __init__(self, model: str = "gpt-5-mini", client: Any | None = None) -> None:
+        self.model = model
+        self._client = client
+
+    @property
+    def client(self) -> Any:
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ImportError as exc:  # pragma: no cover - optional extra
+                raise RuntimeError(
+                    "OpenAI support is optional; install multimodal-study-tutor[openai]"
+                ) from exc
+            self._client = OpenAI()
+        return self._client
+
+    def analyze(self, image_path: str, *, context: str = "") -> dict[str, Any]:
+        path = Path(image_path)
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        prompt = (
+            "分析这张课程页面，只记录看得见的结构，不猜测教师意图。返回 JSON："
+            "kind(text/code/formula/diagram/table/mixed/unknown)、summary、"
+            "nodes、edges、formulas、code、uncertain。节点和边必须是图中可见文字或关系；"
+            "看不清的内容放入 uncertain。" + (f"\n页面文字线索：{context}" if context else "")
+        )
+        response = self.client.responses.create(
+            model=self.model,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"},
+                    ],
+                }
+            ],
+            text={"format": {"type": "json_object"}},
+        )
+        import json
+
+        raw = getattr(response, "output_text", None)
+        if not raw:
+            raise RuntimeError("vision model returned no text")
+        parsed = json.loads(str(raw))
+        if not isinstance(parsed, dict):
+            raise RuntimeError("vision model returned a non-object")
+        return parsed
+
+
+__all__ = [
+    "ModelProvider",
+    "TextModelProvider",
+    "SpeechProvider",
+    "VisionProvider",
+    "MockProvider",
+    "OpenAIProvider",
+    "OpenAISpeechProvider",
+    "OpenAIVisionProvider",
+]

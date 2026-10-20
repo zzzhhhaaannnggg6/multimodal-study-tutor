@@ -47,7 +47,8 @@ from pixels, or hear an audio file without a speech provider. Pages with images,
 formulas or connectors receive a visible visual-review flag; transcript
 segments without lexical anchors remain classroom supplements or unresolved.
 
-Next extensions are a rendered-page/vision adapter, a review screen for
-accepting or rejecting alignment candidates, profile-specific signal rules,
-SQLite search for larger courses, and MCP/Responses adapters over
-`StudyAgent` tools.
+The repository now includes a local rendered-page adapter and an optional
+`VisionProvider`/`OpenAIVisionProvider`. A review screen for accepting or
+rejecting alignment and visual candidates, profile-specific signal rules,
+SQLite search for larger courses, and MCP/Responses adapters over `StudyAgent`
+remain next extensions.

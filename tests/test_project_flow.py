@@ -8,6 +8,7 @@ from mst.ingest import ingest_project, init_project
 from mst.io import project_paths
 from mst.models import LessonMap
 from mst.reconstruct import build_scaffold
+from mst.reconstruct import inspect_project_visuals
 from mst.validation import validate_lesson_map
 
 
@@ -49,6 +50,37 @@ def test_scaffold_records_visual_signals_and_speech_alignment(tmp_path: Path) ->
     segment = data["speech_segments"][0]
     assert segment["alignment"]["visual_ids"] == [data["pages"][0]["visual_id"]]
     assert segment["metadata"]["speech_analysis"]["primary_role"] == "general"
+
+
+def test_optional_vision_provider_enriches_rendered_page_without_verifying_it(tmp_path: Path) -> None:
+    project = tmp_path / "vision-project"
+    init_project(project, "computer-systems")
+    slides = tmp_path / "slides.md"
+    slides.write_text("# Datapath\nPC -> ALU\n", encoding="utf-8")
+    ingest_project(project, [slides])
+    build_scaffold(project)
+    map_path = project_paths(project)["lesson_map"]
+    data = json.loads(map_path.read_text(encoding="utf-8"))
+    rendered = project / "derived" / "rendered" / "p001.png"
+    rendered.parent.mkdir(parents=True)
+    rendered.write_bytes(b"fake-image")
+    data["pages"][0]["image_path"] = "derived/rendered/p001.png"
+    data["visual_sources"] = data["pages"]
+    map_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    class FakeVision:
+        name = "fake-vision"
+
+        def analyze(self, image_path: str, *, context: str = "") -> dict[str, object]:
+            assert image_path.endswith("p001.png")
+            assert "PC" in context
+            return {"kind": "diagram", "summary": "PC 连接 ALU", "nodes": ["PC", "ALU"], "edges": ["PC → ALU"]}
+
+    assert inspect_project_visuals(project, FakeVision()) == 1
+    updated = json.loads(map_path.read_text(encoding="utf-8"))
+    page = updated["pages"][0]
+    assert page["metadata"]["vision_analysis"]["edges"] == ["PC → ALU"]
+    assert page["needs_visual_review"] is True
 
 
 def test_agent_keeps_query_grounded() -> None:

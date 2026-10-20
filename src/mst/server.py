@@ -8,6 +8,7 @@ import json
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import unquote
 
 from .guide import generate_project_guide
 from .ingest import ingest_project
@@ -57,6 +58,31 @@ def serve(project_dir: str | Path, host: str = "127.0.0.1", port: int = 8765, op
             if route == "/study-guide.json" and state["guide"] is not None:
                 send_json(self, state["guide"])
                 return
+            if route.startswith("/assets/"):
+                relative = unquote(route[len("/assets/") :]).lstrip("/")
+                root = (project / "derived" / "rendered").resolve()
+                target = (project / relative).resolve()
+                try:
+                    target.relative_to(root)
+                except ValueError:
+                    send_json(self, {"error": "asset path is outside rendered output"}, 403)
+                    return
+                if not target.is_file():
+                    send_json(self, {"error": "asset does not exist"}, 404)
+                    return
+                content_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(target.suffix.lower(), "application/octet-stream")
+                payload = target.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
             super().do_GET()
 
         def do_POST(self) -> None:
@@ -91,7 +117,7 @@ def serve(project_dir: str | Path, host: str = "127.0.0.1", port: int = 8765, op
                 if not saved:
                     raise ValueError("没有可保存的课程文件")
                 ingest_project(project, saved)
-                build_scaffold(project)
+                build_scaffold(project, render=True)
                 guide = generate_project_guide(project)
                 state["map"] = read_json(project_paths(project)["lesson_map"])
                 state["guide"] = guide.to_dict()
