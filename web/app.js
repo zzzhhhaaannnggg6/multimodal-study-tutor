@@ -15,9 +15,37 @@
     generation_report: { status: "complete", provider: "demo", total_pages: 2, covered_pages: 2, total_segments: 2, aligned_segments: 2, unresolved_items: [], missing_fields: [], warnings: [] }, notes: []
   };
 
-  const state = { guide: demoGuide, view: "route", unitIndex: 0, sourceKind: "demo" };
+  const state = { guide: demoGuide, view: "route", unitIndex: 0, sourceKind: "demo", completed: new Set() };
   const units = () => list(state.guide.units);
   const activeUnit = () => units()[state.unitIndex] || units()[0];
+  const progressKey = () => `mst-progress:${state.guide.lesson_id || state.guide.title || "study-guide"}`;
+
+  function readProgress() {
+    state.completed = new Set();
+    try {
+      const raw = JSON.parse(localStorage.getItem(progressKey()) || "[]");
+      state.completed = new Set(list(raw).map(String));
+    } catch (_) { /* private browsing or an old value: start clean */ }
+  }
+
+  function saveProgress() {
+    try { localStorage.setItem(progressKey(), JSON.stringify([...state.completed])); } catch (_) { /* progress is optional */ }
+  }
+
+  function completionCount() {
+    return units().filter((unit) => state.completed.has(unit.unit_id)).length;
+  }
+
+  function markUnitComplete(index = state.unitIndex) {
+    const unit = units()[index];
+    if (!unit) return;
+    state.completed.add(unit.unit_id);
+    saveProgress();
+  }
+
+  function practiceLabel(kind) {
+    return ({ retrieval: "回忆", process: "过程", transfer: "迁移", comparison: "对比" }[kind] || "练习");
+  }
 
   function setStatus(label, kind = "file") {
     $("sourceStatus").dataset.kind = kind;
@@ -41,33 +69,54 @@
     $("prerequisites").innerHTML = list(route.prerequisites).map((item) => `<li>${lines(item)}</li>`).join("") || "<li>暂无额外先修要求</li>";
     $("unitCount").textContent = `${units().length} 个知识单元`;
     $("draftNotice").hidden = guide.report?.status === "complete";
-    $("draftText").textContent = (guide.report?.warnings || []).join("；") || "部分内容仍需模型或人工复核。";
+    const warningCount = list(guide.report?.warnings).length;
+    $("draftText").textContent = warningCount
+      ? `已保留可定位来源；${warningCount} 项内容仍需要人工或模型复核。`
+      : "部分内容仍需要人工或模型复核。已确认来源会保留。";
+    const done = completionCount();
+    const total = units().length;
+    $("progressBar").style.width = total ? `${Math.round(done / total * 100)}%` : "0%";
+    $("progressText").textContent = total ? `${done}/${total} 个知识点已完成` : "还没有知识单元";
+    $("resumeLearning").hidden = done === 0 || done >= total;
     renderRoute(); renderLearn(); renderReview(); renderSources(); switchView(state.view);
   }
 
   function renderRoute() {
-    $("routeCards").innerHTML = units().map((unit, index) => `<button class="unit-card" data-unit-index="${index}" type="button"><span class="unit-number">${String(index + 1).padStart(2, "0")}</span><span><strong>${esc(unit.title)}</strong><small>${esc(unit.one_sentence || unit.question || "进入本知识点")}</small><em>${esc(unit.priority_label || "重点理解")}</em></span><span class="arrow">→</span></button>`).join("") || `<div class="empty">还没有知识单元。请先运行 <code>study generate</code>。</div>`;
+    $("routeCards").innerHTML = units().map((unit, index) => {
+      const done = state.completed.has(unit.unit_id);
+      return `<button class="unit-card ${done ? "is-done" : ""}" data-unit-index="${index}" type="button"><span class="unit-number">${done ? "✓" : String(index + 1).padStart(2, "0")}</span><span><strong>${esc(unit.title)}</strong><small>${esc(unit.one_sentence || unit.question || "进入本知识点")}</small><em>${done ? "已完成 · 点击复习" : esc(unit.priority_label || "重点理解")}</em></span><span class="arrow">→</span></button>`;
+    }).join("") || `<div class="empty">还没有知识单元。请从上方导入课程材料，或打开已有讲义。</div>`;
     document.querySelectorAll("[data-unit-index]").forEach((button) => button.addEventListener("click", () => { state.unitIndex = Number(button.dataset.unitIndex); state.view = "learn"; render(); }));
     $("startLearning").onclick = () => { state.unitIndex = 0; state.view = "learn"; render(); };
+    $("resumeLearning").onclick = () => {
+      const next = units().findIndex((unit) => !state.completed.has(unit.unit_id));
+      state.unitIndex = next >= 0 ? next : 0;
+      state.view = "learn";
+      render();
+    };
   }
 
   function renderLearn() {
     const unit = activeUnit();
-    $("unitNav").innerHTML = units().map((item, index) => `<button class="nav-item ${index === state.unitIndex ? "is-active" : ""}" data-nav-index="${index}" type="button"><span>${index + 1}</span>${esc(item.title)}</button>`).join("");
+    $("unitNav").innerHTML = units().map((item, index) => `<button class="nav-item ${index === state.unitIndex ? "is-active" : ""} ${state.completed.has(item.unit_id) ? "is-done" : ""}" data-nav-index="${index}" type="button"><span>${state.completed.has(item.unit_id) ? "✓" : index + 1}</span>${esc(item.title)}</button>`).join("");
     document.querySelectorAll("[data-nav-index]").forEach((button) => button.addEventListener("click", () => { state.unitIndex = Number(button.dataset.navIndex); render(); }));
-    if (!unit) { $("lessonContent").innerHTML = `<div class="empty"><strong>还没有可讲解的知识单元</strong><p>先生成 study-guide.json。</p></div>`; return; }
-    const examples = list(unit.worked_examples).map((example) => `<section class="lesson-section example"><h3>完整例题</h3><p class="question"><strong>题目：</strong>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><strong>答案：</strong>${lines(example.answer)}</p><p class="variation"><strong>换一个条件：</strong>${lines(example.variation)}</p></section>`).join("");
+    if (!unit) { $("lessonContent").innerHTML = `<div class="empty"><strong>还没有可讲解的知识单元</strong><p>请从上方导入课程材料，或打开已有讲义。</p></div>`; return; }
+    const examples = list(unit.worked_examples).map((example) => `<section class="lesson-section example"><h3>${example.complete ? "完整例题" : "例题框架"}</h3><p class="question"><strong>题目：</strong>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><strong>答案：</strong>${lines(example.answer)}</p><p class="variation"><strong>换一个条件：</strong>${lines(example.variation)}</p>${example.complete ? "" : "<p class=\"small-note\">当前来源没有给出足够的具体条件；先掌握读题顺序，具体数值题需要补充材料或人工复核。</p>"}</section>`).join("");
     const mistakes = list(unit.misconceptions).length ? `<section class="lesson-section"><h3>最容易错在哪里</h3><div class="mistake-table">${list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("")}</div></section>` : "";
-    const practices = list(unit.practice_items).map((item, index) => `<div class="practice"><p><strong>练习 ${index + 1}：</strong>${lines(item.prompt)}</p><details><summary>查看答案与解析</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p></details></div>`).join("");
-    $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.unitIndex + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label || "重点理解")}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="lesson-section"><h3>先回答：${esc(unit.question || "这个知识点要解决什么问题？")}</h3><p>${lines(unit.why)}</p>${unit.prerequisites?.length ? `<p class="small-note"><b>先修：</b>${unit.prerequisites.map(esc).join("；")}</p>` : ""}</section><section class="lesson-section"><h3>看材料</h3><p>${lines(unit.material_explanation)}</p></section><section class="lesson-section teacher"><h3>课堂补充</h3><p>${lines(unit.teacher_increment)}</p></section><section class="lesson-section bridge"><h3>把逻辑补完整</h3><p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol></section>${examples}${mistakes}<section class="lesson-section"><h3>现在自己回答</h3>${practices || "<p>暂无练习题。</p>"}</section><div class="unit-footer"><span><b>学习重点：</b>${esc(unit.priority_label || "重点理解")}</span><span><b>评价信息：</b>${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${renderSourceList(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" type="button" ${state.unitIndex === 0 ? "disabled" : ""}>← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.unitIndex === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
+    const practices = list(unit.practice_items).map((item, index) => `<div class="practice"><div class="practice-meta"><span>${practiceLabel(item.kind)}</span><small>${esc(item.difficulty || "练习")}</small></div><p><strong>练习 ${index + 1}：</strong>${lines(item.prompt)}</p><details><summary>我已经回答，查看答案与解析</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p></details></div>`).join("");
+    const hint = list(unit.step_chain)[0] || "先找出题目给出的对象和条件。";
+    const done = state.completed.has(unit.unit_id);
+    $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.unitIndex + 1} / ${units().length}${done ? " · 已完成" : ""}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label || "重点理解")}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="predict-box"><h3>先想 30 秒</h3><p>${lines(unit.question || "这个知识点要解决什么问题？")}</p><details><summary>需要提示时再打开</summary><p>可以先从“${lines(hint)}”开始，不必一开始就写完整答案。</p></details></section><section class="lesson-section"><h3>为什么要学</h3><p>${lines(unit.why)}</p>${unit.prerequisites?.length ? `<p class="small-note"><b>先修：</b>${unit.prerequisites.map(esc).join("；")}</p>` : ""}</section><section class="lesson-section"><h3>材料中看什么</h3><p>${lines(unit.material_explanation)}</p></section><section class="lesson-section teacher"><h3>教师补充</h3><p>${lines(unit.teacher_increment)}</p></section><section class="lesson-section bridge"><h3>导师补链：把逻辑补完整</h3><p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol></section>${examples}${mistakes}<section class="lesson-section"><h3>现在自己回答</h3><p class="small-note">先回答，再展开答案。三道题分别检查回忆、过程和迁移。</p>${practices || "<p>暂无练习题。</p>"}</section><div class="unit-footer"><span><b>学习重点：</b>${esc(unit.priority_label || "重点理解")}</span><span><b>评价信息：</b>${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><div class="finish-box"><button class="${done ? "secondary-button" : "primary-button"}" id="markUnit" type="button">${done ? "已完成这个知识点" : "我完成了这个知识点"}</button><span class="muted">完成后会记住进度，方便下次继续。</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${renderSourceList(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" type="button" ${state.unitIndex === 0 ? "disabled" : ""}>← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.unitIndex === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
+    $("markUnit").onclick = () => { markUnitComplete(); render(); };
     $("previousUnit").onclick = () => { if (state.unitIndex > 0) { state.unitIndex -= 1; render(); } };
-    $("nextUnit").onclick = () => { if (state.unitIndex < units().length - 1) { state.unitIndex += 1; render(); } else { state.view = "review"; render(); } };
+    $("nextUnit").onclick = () => { markUnitComplete(); if (state.unitIndex < units().length - 1) { state.unitIndex += 1; render(); } else { state.view = "review"; render(); } };
   }
 
   function renderReview() {
     const route = state.guide.route || {};
     $("reviewChain").innerHTML = list(route.chain).map((item, index) => `<span><b>${index + 1}</b>${esc(item)}</span>`).join("");
-    $("reviewItems").innerHTML = list(state.guide.review_items).map((item, index) => `<article class="review-card card"><p class="eyebrow">复习题 ${index + 1}</p><h3>${lines(item.prompt)}</h3><details><summary>我已经回答，查看答案</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p><button class="link-button" data-review-unit="${esc(item.unit_id || "")}" type="button">回到对应知识点 →</button></details></article>`).join("") || `<div class="empty">暂无复习题。</div>`;
+    const done = completionCount();
+    $("reviewItems").innerHTML = `<p class="review-progress">已完成 ${done}/${units().length} 个知识点。答案展开后，回到错题对应的知识点再看一遍。</p>` + (list(state.guide.review_items).map((item, index) => `<article class="review-card card"><p class="eyebrow">${practiceLabel(item.kind)} · 复习题 ${index + 1}</p><h3>${lines(item.prompt)}</h3><details><summary>我已经回答，查看答案</summary><p><b>答案：</b>${lines(item.answer)}</p><p><b>解析：</b>${lines(item.explanation)}</p><button class="link-button" data-review-unit="${esc(item.unit_id || "")}" type="button">回到对应知识点 →</button></details></article>`).join("") || `<div class="empty">暂无复习题。</div>`);
     document.querySelectorAll("[data-review-unit]").forEach((button) => button.addEventListener("click", () => { const index = units().findIndex((unit) => unit.unit_id === button.dataset.reviewUnit); if (index >= 0) { state.unitIndex = index; state.view = "learn"; render(); } }));
   }
 
@@ -91,7 +140,7 @@
   function loadGuide(guide, kind = "file") {
     if (!guide || typeof guide !== "object") throw new Error("讲义 JSON 必须是对象");
     if (guide.guide_kind !== "student-study-guide") throw new Error("这不是 student-study-guide；请先运行 study generate");
-    state.guide = guide; state.unitIndex = 0; state.sourceKind = kind; setStatus(kind === "demo" ? "内置演示" : "本地讲义", kind); render();
+    state.guide = guide; state.unitIndex = 0; state.sourceKind = kind; readProgress(); setStatus(kind === "demo" ? "内置演示" : "本地讲义", kind); render();
   }
 
   async function boot() {
@@ -108,7 +157,7 @@
         if (!response.ok) throw new Error(result.error || "生成失败");
         loadGuide(result.guide, "file");
         $("uploadMessage").textContent = "已生成。你可以从学习路线开始。";
-      } catch (error) { $("uploadMessage").textContent = `生成失败：${error.message}。也可以先用命令 study generate。`; setStatus("生成失败", "error"); }
+      } catch (error) { $("uploadMessage").textContent = `生成失败：${error.message}。请检查文件格式，或打开已有讲义。`; setStatus("生成失败", "error"); }
       finally { $("generateButton").disabled = false; }
     });
     try { const response = await fetch("study-guide.json", { cache: "no-store" }); if (!response.ok) throw new Error("没有本地讲义"); loadGuide(await response.json(), "file"); } catch (_) { loadGuide(demoGuide, "demo"); }

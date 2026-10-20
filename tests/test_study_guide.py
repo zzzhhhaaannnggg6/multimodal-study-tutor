@@ -37,21 +37,32 @@ def test_generate_student_guide_is_readable_and_traceable() -> None:
     assert guide.route.chain == ["从证据到机制"]
     assert guide.units[0].worked_examples
     assert guide.units[0].practice_items[0].answer
+    assert {item.kind for item in guide.units[0].practice_items} >= {"retrieval", "process", "transfer"}
+    assert len(guide.units[0].worked_examples[0].steps) >= 3
+    assert guide.units[0].misconceptions
     assert guide.units[0].source_refs
     markdown = render_markdown(guide)
     assert "先看学习路线" in markdown
-    assert "完整例题" in markdown
+    assert "例题框架" in markdown
     assert "展开答案与解析" in markdown
     assert "U3" not in markdown and "E1" not in markdown
 
 
 def test_study_guide_round_trip_and_validation() -> None:
-    guide = generate_study_guide(LessonMap.from_json(FIXTURE))
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE), CompleteProvider())
     loaded = StudyGuide.from_dict(json.loads(guide.to_json()))
     report = validate_study_guide(loaded, strict=True)
     assert report.ok, [item.message for item in report.errors]
-    assert report.warnings
+    assert not report.warnings
     assert loaded.units[0].unit_id == guide.units[0].unit_id
+
+
+def test_offline_topic_label_is_not_presented_as_a_complete_example() -> None:
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE))
+    example = guide.units[0].worked_examples[0]
+    assert example.complete is False
+    assert "待补充" in example.title
+    assert any(item.endswith(".worked_examples.complete") for item in guide.report.missing_fields)
 
 
 def test_incomplete_core_unit_is_rejected() -> None:
@@ -68,3 +79,50 @@ def test_provider_can_upgrade_a_draft_to_complete_guide() -> None:
     assert guide.report.provider == "test-provider"
     assert guide.units[0].worked_examples[0].complete is True
     assert validate_study_guide(guide, strict=True).ok
+
+
+def test_computer_systems_offline_guide_uses_concrete_material_example() -> None:
+    lesson = LessonMap.from_dict(
+        {
+            "subject": "computer-systems",
+            "profile": "computer-systems",
+            "title": "第一讲",
+            "pages": [
+                {
+                    "visual_id": "slides::p003",
+                    "page": 3,
+                    "title": "Source Code",
+                    "status": "covered",
+                    "text": "Source Code -> Executable File int x = 10; x = 2 * x + 15; addi r5, r0, 10 muli r5, r5, 2 addi r5, r5, 15 RISC-V",
+                }
+            ],
+        }
+    )
+    guide = generate_study_guide(lesson)
+    unit = guide.units[0]
+    example = unit.worked_examples[0]
+    assert unit.title == "从 C 代码到 RISC-V 指令"
+    assert example.complete is True
+    assert "35" in example.answer
+    assert len(unit.practice_items) == 3
+
+
+def test_unit_sources_are_preserved_when_alignment_is_missing() -> None:
+    lesson = LessonMap.from_dict(
+        {
+            "subject": "generic",
+            "title": "有课程来源的单元",
+            "units": [
+                {
+                    "unit_id": "u1",
+                    "title": "核心概念",
+                    "understanding_level": "U3",
+                    "sources": [{"kind": "lesson", "ref": "lesson-01"}],
+                }
+            ],
+        }
+    )
+    guide = generate_study_guide(lesson)
+    assert guide.units[0].source_refs[0].ref == "lesson-01"
+    assert any(item.ref == "lesson-01" for item in guide.source_index)
+    assert not any(item.endswith(".source_refs") for item in guide.report.missing_fields)

@@ -39,6 +39,353 @@ def _split_chain(value: Any) -> list[str]:
     return [part.strip() for part in _text(value).replace("→", "->").split("->") if part.strip()]
 
 
+def _dedupe(items: Sequence[str]) -> list[str]:
+    """Keep learner-facing lists short and stable while preserving order."""
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        value = _text(item)
+        if value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+def _profile_chain(profile: str, existing: Sequence[str]) -> list[str]:
+    """Return a useful teaching trace when the map only has a sparse chain.
+
+    These are teaching actions rather than claims about the teacher.  They
+    make an offline guide usable while remaining visibly tutor-added.
+    """
+
+    chain = _dedupe(existing)
+    if len(chain) >= 3:
+        return chain
+    if profile == "computer-systems":
+        defaults = [
+            "确定当前状态、输入和指令",
+            "沿数据通路执行运算或访问",
+            "确定结果写回位置以及下一条 PC",
+        ]
+    else:
+        defaults = [
+            "找出材料直接给出的对象或条件",
+            "说明对象之间的关系、过程或理由",
+            "检查结果、适用条件和限制",
+        ]
+    return _dedupe([*chain, *defaults])[:4]
+
+
+def _compact_excerpt(value: Any, limit: int = 260) -> str:
+    """Make raw material readable without silently rewriting its meaning."""
+
+    text = " ".join(_text(value).split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
+    excerpts = [_compact_excerpt(item.text) for item in pages if _text(item.text)]
+    excerpts = _dedupe(excerpts)
+    if not excerpts:
+        return "材料文字尚未提取；请先查看对应页面，下面的逻辑步骤属于导师补链。"
+    joined = "；".join(excerpts[:3])
+    return (
+        f"材料先给出：{joined}\n"
+        f"阅读动作：先圈出“{title}”涉及的对象、条件或符号，再对照下面的步骤，"
+        "确认每一步在材料中对应什么。"
+    )
+
+
+def _teacher_reading(segments: Sequence[SpeechSegment]) -> str:
+    excerpts = [_compact_excerpt(item.text, 220) for item in segments if _text(item.text)]
+    excerpts = _dedupe(excerpts)
+    if not excerpts:
+        return "本节没有可定位的教师补充；下面标为“导师补链”的内容是为了帮助你把材料读通。"
+    return "课堂里可定位到的补充：" + "；".join(excerpts[:4])
+
+
+def _infer_topic_title(text: str, fallback: str) -> str:
+    """Turn slide headings into a student-readable topic title."""
+
+    compact = " ".join(text.split()).lower()
+    patterns = (
+        (("source code", "risc-v", "executable"), "从 C 代码到 RISC-V 指令"),
+        (("program representation and execution", "instruction fetch", "write back"), "指令如何执行：取指到写回"),
+        (("von neumann computer vs. restaurant", "fetch 6th"), "用餐厅类比理解取指、执行与写回"),
+        (("general purpose registers", "details in von-neumann model"), "CPU、寄存器与内存如何协作"),
+        (("main memory", "address content"), "主存：地址和内容"),
+        (("central arithmetical", "central control", "stored program"), "冯·诺依曼模型与存储程序"),
+        (("von neumann", "edvac"), "冯·诺依曼模型：程序、CPU、内存与 I/O"),
+        (("covered in zju computer system courses", "instruction set architecture"), "从应用到硬件：计算机系统分层"),
+        (("information representation", "signal examples", "threshold"), "信息表示：信号与二进制"),
+        (("why binary", "setun"), "为什么数字系统常用二进制"),
+        (("external information", "binary-encoding"), "从外部信息到二进制数据"),
+        (("internal data", "primitive types"), "内部数据：整数、实数与位"),
+        (("(123.456)", "100101.01"), "位置计数法：数字和位权"),
+        (("to convert to decimal", "3a.c"), "R 进制转换为十进制"),
+        (("convert 135", "repeatedly divide"), "十进制转换为 R 进制"),
+        (("135.6875", "join the results"), "带小数的十进制转换"),
+        (("additional issue", "0.65"), "无限小数与截断/舍入"),
+        (("octal (hexadecimal) to binary", "three (four) binary"), "八进制、十六进制与二进制互换"),
+        (("octal to hexadecimal via binary", "635"), "经二进制完成八进制到十六进制"),
+        (("useful for base conversion", "positive powers of 2"), "二进制容量与 2 的幂"),
+        (("carry counting system", "radix", "positional number"), "进位制与数的表示"),
+        (("converting r-base", "repeatedly divide", "convert the integral"), "不同进制之间的转换"),
+        (("binary arithmetic", "single bit addition", "multiple bit"), "二进制算术：加法、减法与进位"),
+        (("binary addition", "carry"), "二进制加法与进位"),
+        (("binary subtraction", "borrow"), "二进制减法与借位"),
+        (("final conversion note", "101110"), "用二进制算术完成进制转换"),
+    )
+    for needles, title in patterns:
+        if all(needle in compact for needle in needles):
+            return title
+    return fallback
+
+
+def _material_example(profile: str, text: str) -> dict[str, Any] | None:
+    """Extract a small number of concrete, source-grounded teaching examples.
+
+    This is intentionally conservative and currently focuses on common
+    computer-systems lecture patterns.  It returns ``None`` when the source
+    does not contain enough facts for a worked answer.
+    """
+
+    compact = " ".join(text.split())
+    if profile != "computer-systems":
+        return None
+    if "int x = 10" in compact and "2 * x + 15" in compact:
+        return {
+            "question": "材料中的 C 代码 `x = 2 * x + 15` 被翻译成三条 RISC-V 指令。执行后 x 的值是多少？",
+            "setup": "从 x=10 开始，按页面给出的指令顺序执行；每一步都写出寄存器 r5 的新值。",
+            "steps": [
+                "`addi r5, r0, 10`：r0 固定为 0，所以 r5 从 0 变成 10。",
+                "`muli r5, r5, 2`：读取当前 r5=10，计算 10×2，写回 r5=20。",
+                "`addi r5, r5, 15`：读取当前 r5=20，计算 20+15，写回 r5=35。",
+            ],
+            "answer": "执行结束后 r5（也就是变量 x）等于 35；关键是按指令顺序追踪每次写回。",
+            "variation": "如果最后一条改为 `addi r5, r5, 7`，前两步不变，最终 r5=27。",
+        }
+    if "instruction fetch" in compact.lower() and "write back" in compact.lower():
+        return {
+            "question": "一条需要读取寄存器并写回结果的指令，如何经过程序执行的五个阶段？",
+            "setup": "材料给出的顺序是 Instruction Fetch、Instruction Decode、Execute、Memory Access、Write Back。逐阶段说明发生了什么。",
+            "steps": [
+                "Instruction Fetch：根据 PC 从指令存储器取出当前指令。",
+                "Instruction Decode：解析操作码和寄存器字段，并读取需要的寄存器值。",
+                "Execute：ALU 按指令要求完成运算或计算地址。",
+                "Memory Access：只有访存指令需要读写数据存储器；其他指令在这里不改变数据。",
+                "Write Back：把结果写回目标寄存器，并更新到下一条指令的 PC。",
+            ],
+            "answer": "执行链条是取指 → 译码 → 执行 →（必要时）访存 → 写回；每一步都对应状态变化。",
+            "variation": "如果题目换成只读寄存器的算术指令，Memory Access 阶段没有数据存储器读写，但仍要经过该时序位置。",
+        }
+    if "von neumann computer vs. restaurant" in compact.lower() and "fetch 6th" in compact.lower():
+        return {
+            "question": "用课件中的餐厅类比解释一次任务执行：原料、待办清单、厨房和存放位置分别对应什么？",
+            "setup": "只使用材料中的对应关系，不把类比当成硬件定义。",
+            "steps": [
+                "把 to-do list 对应为指令，把 raw food 对应为数据。",
+                "从 Memory 取出第 6 个任务和原料，放入 CPU 可直接处理的位置。",
+                "CPU 按任务要求执行 fry，并把结果放回指定的 disk A。",
+                "继续读取 next step；这对应程序按 PC 顺序推进。",
+            ],
+            "answer": "类比帮助我们看见：指令和数据都在存储器中，CPU 取出它们并执行，再把结果写回。",
+            "variation": "若下一步任务改为 prepare，取出的数据和执行动作会改变，但“取出 → 执行 → 写回”的结构保留。",
+        }
+    if "stored program" in compact.lower() and "central arithmetical" in compact.lower():
+        return {
+            "question": "冯·诺依曼模型提出的五个部分是什么？存储程序思想解决了什么问题？",
+            "setup": "先从材料中列出 CA、CC、M、I、O，再说明程序为何可以和数据一起存储。",
+            "steps": [
+                "列出 Central Arithmetical、Central Control、Memory、Input、Output 五个部分。",
+                "说明指令被编码后放在 Memory 中，CPU 可以按顺序取出。",
+                "说明把程序存储起来后，改变存储内容就可以改变执行任务，不必重新接线。",
+            ],
+            "answer": "五部分是运算、控制、存储、输入和输出；存储程序使指令成为可读取、可改变的编码数据。",
+            "variation": "如果题目只问“程序放在哪里”，先回答 Memory，再补充 CPU 负责取指和执行。",
+        }
+    if "information variables represented by physical quantities" in compact.lower() and "threshold region" in compact.lower():
+        return {
+            "question": "为什么数字系统可以把电压范围解释成 0 或 1，而不是要求每个电压都精确相同？",
+            "setup": "根据材料中的离散取值和 threshold region，说明物理量与抽象符号之间的关系。",
+            "steps": [
+                "先区分物理量和抽象值：电压是物理量，0/1 是系统使用的符号。",
+                "确定电压落在哪个阈值范围；同一范围内的值被解释成同一个逻辑值。",
+                "检查噪声是否仍在允许范围内；超出阈值时才可能被判为另一值或不确定。",
+            ],
+            "answer": "数字系统用范围表示逻辑值，是把连续物理量可靠地映射成离散符号；关键是阈值和允许误差。",
+            "variation": "如果两个逻辑范围之间出现不确定区域，题目应先判断电压落在哪个范围，不能直接把它当成 0 或 1。",
+        }
+    if "external information" in compact.lower() and "binary-encoding" in compact.lower():
+        return {
+            "question": "同一张图片为什么既可以从用户角度看成图像，也可以从硬件角度看成二进制数据？",
+            "setup": "沿着材料中的 external information → binary encoding → input/output device 说明视角变化。",
+            "steps": [
+                "从用户视角确定对象：图片、文字、声音或视频。",
+                "说明系统用某种编码把对象转换成二进制序列。",
+                "硬件或低级程序只处理这些位和存储位置，输出时再按约定解释回原对象。",
+            ],
+            "answer": "用户看到的是有意义的信息，机器保存和处理的是编码后的二进制表示；编码规则连接两个视角。",
+            "variation": "把图片换成文本时，外部对象改变，编码规则和数据结构改变，但“信息 → 编码 → 处理/输出”的链条不变。",
+        }
+    if "covered in zju computer system courses" in compact.lower() and "instruction set architecture" in compact.lower():
+        return {
+            "question": "一段高级语言程序为什么要经过编译器、ISA 和计算机组织结构，最后才能在硬件上运行？",
+            "setup": "把课件给出的课程层次当作一条翻译和实现链，不把不同层次的职责混在一起。",
+            "steps": [
+                "应用程序表达要完成的任务，编译器把它翻译成低级指令。",
+                "ISA 规定指令的语义、寄存器和可见状态，保证软件知道如何使用机器。",
+                "计算机组织结构和数字逻辑负责真正执行这些指令，操作系统再提供更高层的资源管理。",
+            ],
+            "answer": "每一层都把上一层的意图变成自己能处理的对象；ISA 是软件和硬件之间的稳定接口。",
+            "variation": "如果只更换内部数据通路而保持 ISA 不变，上层程序的写法可以保持不变，这正是接口分层的价值。",
+        }
+    if "(123.456)" in compact and "(100101.01)" in compact:
+        return {
+            "question": "如何把一个带小数的进制数读成它的十进制含义？",
+            "setup": "课件用 123.456₁₀ 和 100101.01₂ 展示位置权重；小数点右侧使用负次方。",
+            "steps": [
+                "按位置写出每一位对应的 radix 次方。",
+                "分别计算整数部分和小数部分，注意小数点右侧的指数从 -1 开始。",
+                "把两部分相加，并检查每个数字是否小于 radix。",
+            ],
+            "answer": "位值不是由数字本身决定，而是由数字和所在位置共同决定；小数位使用负次方。",
+            "variation": "把 radix 从 2 换成 16 时，步骤不变，只需将每个位置权重换成 16 的次方。",
+        }
+    if "123.456" in compact and "100101.01" in compact:
+        return {
+            "question": "如何把一个带小数的进制数读成它的十进制含义？",
+            "setup": "课件用十进制 123.456 和二进制 100101.01 展示位置权重；小数点右侧使用负次方。",
+            "steps": [
+                "按位置写出每一位对应的 radix 次方。",
+                "分别计算整数部分和小数部分，注意小数点右侧的指数从 -1 开始。",
+                "把两部分相加，并检查每个数字是否小于 radix。",
+            ],
+            "answer": "位值由数字和所在位置共同决定；小数位使用负次方。",
+            "variation": "把 radix 从 2 换成 16 时，步骤不变，只需将每个位置权重换成 16 的次方。",
+        }
+    if "100101.01" in compact and "37.25" in compact:
+        return {
+            "question": "把二进制数 `(100101.01)₂` 转换成十进制。",
+            "setup": "整数部分按 2 的非负次方展开，小数部分按 2 的负次方展开。",
+            "steps": [
+                "整数部分：1×2⁵+0×2⁴+0×2³+1×2²+0×2¹+1×2⁰=37。",
+                "小数部分：0×2⁻¹+1×2⁻²=0.25。",
+                "相加得到 37+0.25=37.25。",
+            ],
+            "answer": "`(100101.01)₂ = (37.25)₁₀`。",
+            "variation": "如果最后一位从 1 改为 0，小数部分减少 2⁻²=0.25，结果变为 37。",
+        }
+    if "3A.CH" in compact and "58.75" in compact:
+        return {
+            "question": "把十六进制数 `(3A.C)₁₆` 转换成十进制。",
+            "setup": "A=10、C=12；按位置展开整数位和小数位。",
+            "steps": [
+                "整数部分：3×16¹+10×16⁰=58。",
+                "小数部分：12×16⁻¹=0.75。",
+                "相加得到 58.75，并检查 C 是否被正确解释成 12。",
+            ],
+            "answer": "`(3A.C)₁₆ = (58.75)₁₀`。",
+            "variation": "把 C 改成 8 时，只需把小数贡献从 12/16 改成 8/16。",
+        }
+    if "135.6875" in compact and "10000111.1011" in compact:
+        return {
+            "question": "把十进制数 135.6875 转换成二进制。",
+            "setup": "整数部分使用重复除 2，小数部分使用重复乘 2，最后拼接。",
+            "steps": [
+                "135 的二进制是 10000111。",
+                "0.6875 反复乘 2，取每次结果的整数位，得到 0.1011。",
+                "拼接整数和小数部分，得到 10000111.1011。",
+            ],
+            "answer": "`135.6875₁₀ = 10000111.1011₂`。",
+            "variation": "只改变小数部分时，整数部分的转换不变；重新做重复乘 2 的过程即可。",
+        }
+    if "01100" in compact and "10001" in compact and "multiple bit binary addition" in compact.lower():
+        return {
+            "question": "计算二进制加法 `01100₂ + 10001₂`，并说明进位如何处理。",
+            "setup": "从最低位向最高位逐列相加；最低位的 carry-in 为 0。",
+            "steps": [
+                "最低位开始逐列相加，每一列都把上一列的进位带入。",
+                "出现 2 或 3 时写下当前位，并把进位传给左侧；不要把进位丢掉。",
+                "最后检查结果的位数和十进制值是否与 12+17=29 一致。",
+            ],
+            "answer": "结果为 `11101₂`（十进制 29）；验证时要同时检查每一列的和与进位。",
+            "variation": "若最低位 carry-in 改为 1，相当于结果再加 1，需要重新处理从最低位开始的进位链。",
+        }
+    if "10110" in compact and "10010" in compact and "minuend" in compact.lower():
+        return {
+            "question": "计算二进制减法 `10110₂ - 10010₂`，并检查借位。",
+            "setup": "从最低位向最高位逐列相减；需要借位时，把借位传给左侧。",
+            "steps": [
+                "先对齐两个数，最低位的 borrow-in 为 0。",
+                "逐列计算，被减位不足时从左侧借 1，并记录借位。",
+                "得到 `00100₂`，再用十进制 22-18=4 检查结果。",
+            ],
+            "answer": "`10110₂ - 10010₂ = 00100₂`。",
+            "variation": "如果减数大于被减数，先判断结果为负，再按材料要求交换并在结果前标记负号。",
+        }
+    if "635" in compact and "octal to hexadecimal" in compact.lower():
+        return {
+            "question": "把八进制 `635.177₈` 转换成十六进制，为什么要经过二进制？",
+            "setup": "八进制每位对应 3 个二进制位，十六进制每位对应 4 个二进制位。",
+            "steps": [
+                "先把每个八进制数字替换成 3 位二进制，并在小数点两侧分组。",
+                "从小数点开始按 4 位重新分组，不足的位用 0 补齐。",
+                "把每组 4 位换成十六进制数字，得到 `19D.3F8₁₆`。",
+            ],
+            "answer": "经过二进制分组可以直接得到 `635.177₈ = 19D.3F8₁₆`；中间分组不能跨过小数点。",
+            "variation": "换成二进制转八进制时，改用每 3 位一组，规则完全对应。",
+        }
+    if "2 10 (1024)" in compact and "2 20" in compact:
+        return {
+            "question": "为什么计算机课程中经常出现 2¹⁰=1024、2²⁰=1,048,576？",
+            "setup": "从二进制位权出发，把指数拆成可记忆的数量级。",
+            "steps": [
+                "一组 10 个二进制位有 2¹⁰ 个不同组合，即 1024。",
+                "两组 10 位相乘得到 2²⁰=1,048,576。",
+                "再把它们与课程中的 K、M 等容量单位对应，并注意不要和十进制前缀混淆。",
+            ],
+            "answer": "这些数来自二进制位数的组合数量；它们不是随意的十进制近似。",
+            "variation": "题目给出 2³⁰ 或 2⁴⁰ 时，沿同样的指数规律继续计算，不要直接套十进制 10³。",
+        }
+    if "final conversion note" in compact.lower() and "101110" in compact:
+        return {
+            "question": "用二进制算术把 `101110₂` 转换成十进制。",
+            "setup": "课件把除数 1010₂ 当作十进制 10，连续做整除并记录余数。",
+            "steps": [
+                "第一次：101110₂ ÷ 1010₂ = 100₂，余数 0110₂。",
+                "第二次：100₂ ÷ 1010₂ = 0，余数 0100₂。",
+                "把余数从后向前读成 0100₂|0110₂，即 46₁₀，并检查 32+8+4+2=46。",
+            ],
+            "answer": "`101110₂ = 46₁₀`；连续除法得到的余数要逆序读取。",
+            "variation": "如果换成其他目标进制，除数和余数的位数会改变，但“反复相除、逆序读余数”的规则不变。",
+        }
+    return None
+
+
+def _learner_outcome(profile: str, title: str, fallback: str, example: Mapping[str, Any] | None) -> str:
+    """Turn a topic into an observable action for the route card."""
+
+    if fallback and "解释这一组材料" not in fallback:
+        return fallback
+    if profile == "computer-systems":
+        lower = title.lower()
+        if "risc-v" in lower or "指令" in title:
+            return "能按指令顺序追踪状态、运算、写回位置和下一条 PC。"
+        if "进制" in title or "二进制" in title or "位权" in title:
+            return "能按位权或重复除/乘法完成转换，并用另一种方法检查结果。"
+        if "信号" in title or "信息表示" in title:
+            return "能区分物理量、离散逻辑值和编码后的数据表示。"
+        if "模型" in title or "内存" in title or "CPU" in title:
+            return "能说明指令、数据、CPU、内存和 I/O 如何协作。"
+    if example:
+        return "能沿着例题的步骤说明条件、过程和结果，并处理一个只改变一个条件的变式。"
+    return fallback or f"能用自己的话解释“{title}”，并说明它在整节课中的作用。"
+
+
 @dataclass
 class GuideSourceRef:
     """A human-readable link back to the material or classroom."""
@@ -490,8 +837,10 @@ def _infer_units(pages: Sequence[VisualFrame], segments: Sequence[SpeechSegment]
         first = chunk[0]
         last = chunk[-1]
         page_label = f"第 {first.page} 页" if first.page == last.page else f"第 {first.page}–{last.page} 页"
-        title = _text(first.title, f"材料片段 {page_label}")
-        if len(chunk) > 1:
+        raw_topic = " ".join(_text(item.text) for item in chunk)
+        fallback_title = _text(first.title, f"材料片段 {page_label}")
+        title = _infer_topic_title(raw_topic, fallback_title)
+        if title == fallback_title and len(chunk) > 1:
             title = f"{title}（{page_label}）"
         groups.append(
             KnowledgeUnit(
@@ -510,44 +859,222 @@ def _infer_units(pages: Sequence[VisualFrame], segments: Sequence[SpeechSegment]
     return groups
 
 
-def _make_example(unit: KnowledgeUnit, refs: list[GuideSourceRef]) -> WorkedExample:
+def _make_example(
+    unit: KnowledgeUnit,
+    refs: list[GuideSourceRef],
+    *,
+    profile: str = "generic",
+    material_text: str = "",
+) -> WorkedExample:
+    """Build a teachable example scaffold without inventing course facts.
+
+    A map-provided example supplies the question.  The tutor supplies the
+    actions needed to inspect it; missing factual numbers or diagrams remain
+    visibly incomplete instead of being guessed.
+    """
+
+    derived = _material_example(profile, material_text)
     raw = _text(unit.representative_example or unit.counterexample)
-    chain = _split_chain(unit.logic_chain)
-    steps = [f"先做：{part}" for part in chain]
+    chain = _profile_chain(profile, _split_chain(unit.logic_chain))
+    steps = [f"第 {index} 步：{part}" for index, part in enumerate(chain, 1)]
+    if derived:
+        return WorkedExample(
+            title="完整例题",
+            question=derived["question"],
+            setup=derived["setup"],
+            steps=derived["steps"],
+            answer=derived["answer"],
+            variation=derived["variation"],
+            source_refs=refs,
+            complete=True,
+        )
     if raw:
         question = raw
-        setup = "先把题目或新案例中的已知条件写出来，再沿着本单元的逻辑链检查。"
-        answer = _text(unit.learner_action, "根据逻辑链说明证据、过程和结果之间的关系。")
+        setup = "先写出题目明确给出的条件、对象和要解释的结果，再逐步检查。"
+        answer = _text(
+            unit.learner_action,
+            "沿着每一步说明对象如何变化，并在最后检查结果是否满足题目条件。",
+        )
+        title = "例题框架（待补充具体条件）"
     else:
-        question = "请把本单元的逻辑链应用到一个新情境。"
-        setup = "题目材料不足，先写出对象、条件和要解释的结果。"
-        answer = "根据本单元的步骤逐项说明；当前地图没有提供完整演算过程。"
+        question = f"围绕“{_text(unit.title, '本知识点')}”，从材料中找出对象、过程和结果。"
+        setup = "这是一道材料阅读例题。当前来源没有给出足够的具体数值或图形，先练习正确的读题顺序。"
+        answer = "先指出材料中的直接信息，再说明中间过程，最后写出结果和适用条件。"
+        title = "材料阅读例题（待补充具体条件）"
     return WorkedExample(
-        title="代表性例子（生成草稿）",
+        title=title if raw else "材料阅读例题（待补充具体条件）",
         question=question,
         setup=setup,
         steps=steps,
         answer=answer,
-        variation=_text(unit.transfer_question, "换一个条件后，检查哪一步会改变。"),
+        variation=_text(
+            unit.transfer_question,
+            "只改变一个条件，重新检查哪一步会改变，以及最后的结论是否仍然成立。",
+        ),
         source_refs=refs,
-        complete=bool(raw and len(steps) >= 2 and answer),
+        # A map's ``representative_example`` is often only a topic label
+        # (for example, “两层调用中保存 ra”).  It is not enough evidence for
+        # a student to solve a worked problem.  Keep the scaffold visible but
+        # leave it incomplete until concrete source facts or a provider supply
+        # the conditions, derivation and checked answer.
+        complete=False,
     )
 
 
-def _make_practice(unit: KnowledgeUnit, refs: list[GuideSourceRef], suffix: str = "01") -> PracticeItem:
-    prompt = _text(unit.transfer_question or unit.learner_action, "请用自己的话复述本单元的核心链条。")
-    answer = _text(unit.learner_action or unit.logic_chain, "答案需要覆盖本单元的核心步骤。")
-    explanation = _text(unit.logic_chain, "先说明对象，再说明关系或过程，最后检查结果和限制。")
-    return PracticeItem(
-        practice_id=f"{unit.unit_id}::practice-{suffix}",
-        prompt=prompt,
-        kind="transfer" if unit.transfer_question else "retrieval",
-        difficulty="基础迁移",
-        answer=answer,
-        explanation=explanation,
-        unit_id=unit.unit_id,
-        source_refs=refs,
+def _make_misconceptions(unit: KnowledgeUnit, *, profile: str = "generic") -> list[Misconception]:
+    if unit.counterexample:
+        return [
+            Misconception(
+                "把反例当成普遍结论",
+                _text(unit.counterexample),
+                "先检查成立条件，再决定能否推广。",
+            )
+        ]
+    if profile == "computer-systems":
+        return [
+            Misconception(
+                "只看最后得到的数，不追踪状态、写回位置和下一条 PC。",
+                "一次执行要同时说明当前状态、运算过程、目的地和下一状态。",
+                "做题时按“当前状态 → 运算/访问 → 写回 → 下一 PC”逐格检查。",
+            )
+        ]
+    return [
+        Misconception(
+            "只背最后的结论，跳过条件和中间过程。",
+            "能迁移到新题的解释必须包含条件、过程和结果。",
+            "把结论拆回步骤，并检查每一步是否有材料或标准知识支持。",
+        )
+    ]
+
+
+def _make_practice_items(
+    unit: KnowledgeUnit | LearningUnit,
+    refs: list[GuideSourceRef],
+    *,
+    profile: str = "generic",
+) -> list[PracticeItem]:
+    """Provide retrieval, process and transfer practice in that order."""
+
+    raw_chain = getattr(unit, "logic_chain", None) or getattr(unit, "step_chain", None)
+    chain = _profile_chain(profile, _split_chain(raw_chain))
+    action = _text(
+        getattr(unit, "learner_action", None) or getattr(unit, "one_sentence", None),
+        f"说明“{unit.title}”的核心对象、过程和结果。",
     )
+    chain_text = " → ".join(chain)
+    rows = [
+        PracticeItem(
+            practice_id=f"{unit.unit_id}::practice-01",
+            prompt=f"合上材料，用一句话说明“{unit.title}”要解决什么问题。",
+            kind="retrieval",
+            difficulty="基础",
+            answer=action,
+            explanation="先说清楚对象和要解决的问题；不要只复述标题。",
+            unit_id=unit.unit_id,
+            source_refs=refs,
+        ),
+        PracticeItem(
+            practice_id=f"{unit.unit_id}::practice-02",
+            prompt="请按正确顺序写出完成这个知识点时要检查的步骤。",
+            kind="process",
+            difficulty="过程",
+            answer=chain_text,
+            explanation="评分重点是顺序和每一步的作用；如果只能写出最后结论，说明中间链条还没有掌握。",
+            unit_id=unit.unit_id,
+            source_refs=refs,
+        ),
+        PracticeItem(
+            practice_id=f"{unit.unit_id}::practice-03",
+            prompt=_text(
+                getattr(unit, "transfer_question", None),
+                "只改变一个条件后，哪一步需要重新检查？为什么？",
+            ),
+            kind="transfer",
+            difficulty="迁移",
+            answer="先定位被改变的条件，再沿步骤检查它影响的中间过程和最终结果。",
+            explanation="迁移题不要求背原题答案，而要求找出条件变化会经过哪一条关系影响结论。",
+            unit_id=unit.unit_id,
+            source_refs=refs,
+        ),
+    ]
+    return rows
+
+
+def _ensure_practice_set(unit: LearningUnit, refs: list[GuideSourceRef], *, profile: str) -> None:
+    """Fill only missing practice roles after provider enrichment."""
+
+    existing = list(unit.practice_items)
+    by_kind = {item.kind for item in existing if item.prompt and item.answer and item.explanation}
+    defaults = _make_practice_items(unit, refs, profile=profile)
+    for item in defaults:
+        if item.kind not in by_kind:
+            existing.append(item)
+            by_kind.add(item.kind)
+    for index, item in enumerate(existing, 1):
+        item.practice_id = item.practice_id or f"{unit.unit_id}::practice-{index:02d}"
+        item.unit_id = unit.unit_id
+        if not item.source_refs:
+            item.source_refs = refs
+    unit.practice_items = existing[:5]
+
+
+def _ensure_example_steps(unit: LearningUnit) -> None:
+    """Keep a provider's short answer teachable without adding facts."""
+
+    chain = _profile_chain("generic", unit.step_chain)
+    for example in unit.worked_examples:
+        if not example.complete:
+            continue
+        if not example.setup:
+            example.setup = "先写出题目明确给出的条件、对象和要解释的结果，再逐步检查。"
+        while len(example.steps) < 3:
+            index = len(example.steps)
+            fallback = chain[index] if index < len(chain) else "回到题目条件，检查结果和适用范围"
+            example.steps.append(f"第 {index + 1} 步：{fallback}")
+        if not example.variation:
+            example.variation = "只改变一个条件后，重新检查上述步骤。"
+
+
+def _quality_issues(unit: LearningUnit) -> list[str]:
+    """Return learner-facing completeness failures for one core unit."""
+
+    issues: list[str] = []
+    if len(unit.question.strip()) < 8:
+        issues.append("question")
+    if len(unit.one_sentence.strip()) < 8:
+        issues.append("one_sentence")
+    if len(unit.why.strip()) < 12:
+        issues.append("why")
+    if len(unit.material_explanation.strip()) < 12:
+        issues.append("material_explanation")
+    if len(unit.tutor_bridge.strip()) < 12:
+        issues.append("tutor_bridge")
+    if len(unit.step_chain) < 3:
+        issues.append("step_chain>=3")
+    if not unit.source_refs:
+        issues.append("source_refs")
+    if not unit.worked_examples:
+        issues.append("worked_examples")
+    else:
+        complete_example = any(
+            item.complete
+            and len(item.question.strip()) >= 8
+            and item.setup.strip()
+            and len(item.steps) >= 3
+            and item.answer.strip()
+            and item.variation.strip()
+            for item in unit.worked_examples
+        )
+        if not complete_example:
+            issues.append("worked_examples.complete")
+    good_practice = [item for item in unit.practice_items if item.prompt.strip() and item.answer.strip() and item.explanation.strip()]
+    if len(good_practice) < 3:
+        issues.append("practice_items>=3")
+    if not {item.kind for item in good_practice}.issuperset({"retrieval", "process", "transfer"}):
+        issues.append("practice_roles")
+    if not unit.misconceptions:
+        issues.append("misconceptions")
+    return issues
 
 
 def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tuple[LearningUnit, str | None]:
@@ -562,13 +1089,16 @@ def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tu
         "required": [
             "one_sentence", "why", "material_explanation", "teacher_increment",
             "tutor_bridge", "step_chain", "worked_examples", "misconceptions",
-            "practice_items",
+            "practice_items (must include retrieval, process and transfer)",
         ],
     }
     system = (
         "你是面向没有听课的大学生的中文导师。只依据给定材料和课堂片段，"
-        "把知识单元写成可以独立学习的内容。导师补链必须明确标注；不能伪造教师原话、"
-        "考试承诺、页码或时间戳。返回 JSON 对象，不要返回 Markdown。"
+        "把知识单元写成可以独立学习的内容。先解释再总结，使用短句和具体动作；"
+        "完整例题必须有题目、条件、至少三步过程、答案和一个只改变一个条件的变式。"
+        "练习必须至少包含 retrieval、process、transfer 三类，并为每题提供答案和解析。"
+        "导师补链必须明确标注；不能伪造教师原话、考试承诺、页码或时间戳。"
+        "返回 JSON 对象，不要返回 Markdown。"
     )
     try:
         raw = provider.complete(system=system, user=json.dumps(prompt, ensure_ascii=False), response_format="json")
@@ -610,8 +1140,6 @@ def generate_study_guide(
     for claim in lesson.claims:
         if claim.unit_id:
             claims_by_unit.setdefault(claim.unit_id, []).append(claim)
-    page_by_id = {item.visual_id: item for item in pages}
-    segment_by_id = {item.segment_id: item for item in segments}
     source_units = list(lesson.units)
     inferred_units = False
     if not source_units and (pages or segments):
@@ -620,41 +1148,73 @@ def generate_study_guide(
     units: list[LearningUnit] = []
     missing: list[str] = []
     warnings: list[str] = []
+    unit_titles = {item.unit_id: _text(item.title, item.unit_id) for item in source_units}
 
     for source_unit in source_units:
         unit_pages = _unit_pages(source_unit, pages)
         unit_segments = _unit_segments(source_unit, segments)
         refs = [_page_ref(item) for item in unit_pages]
         refs.extend(_segment_ref(item) for item in unit_segments)
+        # A lesson map may carry stable lesson/document references even when
+        # page or speech alignment has not been built yet.  Preserve those
+        # references in the student guide so every core unit remains traceable
+        # instead of being rejected as source-less.
+        refs.extend(_source_from_evidence(item) for item in source_unit.sources)
         for claim in claims_by_unit.get(source_unit.unit_id, []):
             refs.extend(_source_from_evidence(item) for item in claim.sources)
         refs = list({item.ref: item for item in refs}.values())
-        chain = _split_chain(source_unit.logic_chain)
+        chain = _profile_chain(lesson.profile, _split_chain(source_unit.logic_chain))
         title = _text(source_unit.title, "未命名知识单元")
-        one_sentence = _text(source_unit.learner_action, f"理解“{title}”的核心对象、关系和应用方式。")
-        question = f"{title}到底要解决什么问题？"
-        why = f"先解决这个问题，后面的内容才能沿着“{_text(source_unit.logic_chain, '对象 → 过程 → 结果')}”继续推理。"
-        material = "\n".join(_text(item.text) for item in unit_pages if _text(item.text))
-        teacher = "\n".join(_text(item.text) for item in unit_segments if _text(item.text))
-        bridge = f"把材料中的信息连起来：{_text(source_unit.logic_chain, '先确定对象，再追踪关系，最后检查结果。')}"
-        misconceptions = []
-        if source_unit.counterexample:
-            misconceptions.append(Misconception("把反例当成普遍结论", source_unit.counterexample, "先检查成立条件，再决定能否推广。"))
+        raw_material = "\n".join(_text(item.text) for item in unit_pages if _text(item.text))
+        # Derive the route-card outcome from the same concrete material example
+        # used below.  This keeps the learner promise observable (what the
+        # student can actually do after studying the unit) instead of leaving
+        # inferred units with the generic “解释这一组材料” wording.
+        derived_example = _material_example(lesson.profile, raw_material)
+        one_sentence = _learner_outcome(
+            lesson.profile,
+            title,
+            _text(source_unit.learner_action, f"学会按“{' → '.join(chain)}”解释并检查“{title}”。"),
+            derived_example,
+        )
+        question = _text(
+            source_unit.metadata.get("central_question") if isinstance(source_unit.metadata, Mapping) else None,
+            f"“{title}”到底要解决什么问题？",
+        )
+        why = (
+            f"这个知识点的作用，是把材料中的信息变成可以检查、可以迁移的判断。"
+            f"后面的内容会沿着“{' → '.join(chain)}”展开。"
+        )
+        material = _material_reading(unit_pages, title)
+        teacher = _teacher_reading(unit_segments)
+        bridge = (
+            "【导师补链】先把材料中能直接看到的对象或条件列出来；"
+            f"再依次完成“{' → '.join(chain)}”，最后检查结论成立的条件。"
+        )
+        misconceptions = _make_misconceptions(source_unit, profile=lesson.profile)
+        prerequisites = [unit_titles.get(item, item) for item in source_unit.prerequisite_ids]
         unit = LearningUnit(
             unit_id=source_unit.unit_id,
             title=title,
             question=question,
             one_sentence=one_sentence,
             why=why,
-            prerequisites=[_text(item) for item in source_unit.prerequisite_ids],
+            prerequisites=_dedupe(prerequisites),
             visual_refs=[item.visual_id for item in unit_pages],
             material_explanation=material or "材料文字尚未提取；请查看来源页或等待视觉解析。",
             teacher_increment=teacher or "没有可定位的教师补充片段。",
             tutor_bridge=bridge,
             step_chain=chain or ["确定对象", "追踪关系或过程", "检查结果与限制"],
-            worked_examples=[_make_example(source_unit, refs)],
+            worked_examples=[
+                _make_example(
+                    source_unit,
+                    refs,
+                    profile=lesson.profile,
+                    material_text=raw_material,
+                )
+            ],
             misconceptions=misconceptions,
-            practice_items=[_make_practice(source_unit, refs)],
+            practice_items=_make_practice_items(source_unit, refs, profile=lesson.profile),
             priority_label=_priority(source_unit.understanding_level),
             assessment_signal=_assessment(source_unit.exam_evidence_level),
             source_refs=refs,
@@ -667,32 +1227,39 @@ def generate_study_guide(
             unit, warning = _enrich_with_provider(unit, provider, context)
             if warning:
                 warnings.append(f"{unit.unit_id}: {warning}")
-        required = [
-            ("question", unit.question),
-            ("one_sentence", unit.one_sentence),
-            ("why", unit.why),
-            ("step_chain", unit.step_chain),
-            ("worked_examples", unit.worked_examples),
-            ("practice_items", unit.practice_items),
-            ("source_refs", unit.source_refs),
-        ]
-        for name, value in required:
-            if not value:
-                missing.append(f"{unit.unit_id}.{name}")
-        if not unit.worked_examples or not all(item.complete for item in unit.worked_examples):
-            missing.append(f"{unit.unit_id}.worked_examples.complete")
+        # A provider may replace fields, so restore stable provenance and
+        # fill missing learning roles after enrichment.
+        for example in unit.worked_examples:
+            if not example.source_refs:
+                example.source_refs = refs
+        _ensure_example_steps(unit)
+        _ensure_practice_set(unit, refs, profile=lesson.profile)
+        issues = _quality_issues(unit)
+        missing.extend(f"{unit.unit_id}.{item}" for item in issues)
+        unit.status = "ready" if provider is not None and not issues else "draft"
         units.append(unit)
 
     source_index = [_page_ref(item) for item in pages]
     source_index.extend(_segment_ref(item) for item in segments)
+    source_index.extend(ref for unit in units for ref in unit.source_refs)
+    source_index = list(
+        {
+            (item.kind, item.ref, item.page, item.start, item.end): item
+            for item in source_index
+        }.values()
+    )
     outcomes = [item.one_sentence for item in units[:4]]
     chain = [item.title for item in units]
+    first_question = units[0].question if units else "这节课要把哪些材料变成可以使用的知识？"
+    central_question = _text(lesson.theme, first_question)
+    if central_question == _text(lesson.title) and central_question:
+        central_question = f"如何理解并应用“{central_question}”？"
     route = StudyRoute(
-        central_question=_text(lesson.title, "这节课要把哪些材料信息变成可以使用的知识？"),
+        central_question=central_question,
         outcomes=outcomes,
         prerequisites=list(dict.fromkeys(item for unit in units for item in unit.prerequisites)),
         chain=chain,
-        estimated_minutes=max(10, len(units) * 8),
+        estimated_minutes=max(10, min(120, len(units) * 10)),
     )
     review_items = [item for unit in units for item in unit.practice_items]
     aligned = sum(1 for item in segments if item.alignment and item.alignment.status in {"aligned", "covered", "verified"})
@@ -719,6 +1286,7 @@ def generate_study_guide(
     notes = [
         "学生主阅读层不显示内部 U/E 等级；来源详情保留在每个知识单元下方。",
         "没有模型或完整证据时，状态为草稿，不能替代完整授课。",
+        "每个知识点按“回忆 → 过程 → 迁移”提供练习；答案应在独立作答后展开。",
     ]
     return StudyGuide(
         guide_version="1.0",
@@ -751,6 +1319,17 @@ def validate_study_guide(value: StudyGuide | Mapping[str, Any] | str | Path, *, 
                 report.diagnostics.append(GuideDiagnostic("error", "unit.incomplete", f"{path}.{name}", "核心知识单元缺少独立学习所需内容"))
         if not unit.worked_examples or not all(example.complete for example in unit.worked_examples):
             report.diagnostics.append(GuideDiagnostic("error" if strict else "warning", "example.incomplete", f"{path}.worked_examples", "至少一个例题还没有完整步骤或答案"))
+        if strict:
+            for issue in _quality_issues(unit):
+                code = "unit.quality"
+                report.diagnostics.append(
+                    GuideDiagnostic(
+                        "error",
+                        code,
+                        path,
+                        f"核心知识单元仍缺少可独立学习的质量项：{issue}",
+                    )
+                )
         for item_index, practice in enumerate(unit.practice_items):
             if not practice.answer or not practice.explanation:
                 report.diagnostics.append(GuideDiagnostic("error", "practice.answer_missing", f"{path}.practice_items[{item_index}]", "练习必须有答案和解析"))
@@ -768,6 +1347,15 @@ def _md_source(ref: GuideSourceRef) -> str:
     return f"`{ref.label}`（{location}）"
 
 
+def _practice_label(kind: str) -> str:
+    return {
+        "retrieval": "回忆",
+        "process": "过程",
+        "transfer": "迁移",
+        "comparison": "对比",
+    }.get(kind, "练习")
+
+
 def render_markdown(guide: StudyGuide) -> str:
     """Render a readable, print-friendly Chinese study handout."""
 
@@ -783,31 +1371,32 @@ def render_markdown(guide: StudyGuide) -> str:
         lines.extend([f"**先修知识：** {'；'.join(guide.route.prerequisites)}", ""])
     if guide.route.chain:
         lines.extend(["**学习顺序：** " + " → ".join(guide.route.chain), ""])
+    lines.extend(["**每个知识点的做法：** 先想一遍，再看解释；最后完成回忆、过程和迁移练习。", ""])
     for index, unit in enumerate(guide.units, 1):
-        lines.extend([f"## {index}. {unit.title}", "", f"> **先记住一句话：** {unit.one_sentence}", "", f"### 1. 先回答：{unit.question}", "", unit.why, ""])
+        lines.extend([f"## {index}. {unit.title}", "", f"> **先记住一句话：** {unit.one_sentence}", "", f"### 1. 先想 30 秒：{unit.question}", "", "先不要看答案，尝试写出你认为的对象、过程或结果。", "", "### 2. 为什么要学", "", unit.why, ""])
         if unit.prerequisites:
             lines.extend([f"**需要先会：** {'；'.join(unit.prerequisites)}", ""])
-        lines.extend(["### 2. 看材料", "", unit.material_explanation, ""])
-        lines.extend(["### 3. 课堂补充", "", unit.teacher_increment, ""])
-        lines.extend(["### 4. 把逻辑补完整", "", unit.tutor_bridge, ""])
+        lines.extend(["### 3. 材料中看什么", "", unit.material_explanation, ""])
+        lines.extend(["### 4. 教师补充", "", unit.teacher_increment, ""])
+        lines.extend(["### 5. 导师补链：把逻辑补完整", "", unit.tutor_bridge, ""])
         if unit.step_chain:
             lines.append("过程可以按下面顺序检查：")
             lines.extend(f"{step_index}. {step}" for step_index, step in enumerate(unit.step_chain, 1))
             lines.append("")
         for example in unit.worked_examples:
-            lines.extend(["### 5. 完整例题", "", f"**题目：** {example.question}", "", example.setup, ""])
+            lines.extend([f"### 6. {example.title}", "", f"**题目：** {example.question}", "", example.setup, ""])
             if example.steps:
                 lines.append("**一步一步做：**")
                 lines.extend(f"{step_index}. {step}" for step_index, step in enumerate(example.steps, 1))
                 lines.append("")
             lines.extend([f"**答案：** {example.answer}", "", f"**换一个条件：** {example.variation}", ""])
         if unit.misconceptions:
-            lines.extend(["### 6. 最容易错在哪里", "", "| 错误想法 | 正确判断 | 纠正动作 |", "| --- | --- | --- |"])
+            lines.extend(["### 7. 最容易错在哪里", "", "| 错误想法 | 正确判断 | 纠正动作 |", "| --- | --- | --- |"])
             lines.extend(f"| {item.wrong} | {item.correct} | {item.correction} |" for item in unit.misconceptions)
             lines.append("")
-        lines.extend(["### 7. 先自己回答", ""])
+        lines.extend(["### 8. 先自己回答", ""])
         for practice in unit.practice_items:
-            lines.extend([f"**问题：** {practice.prompt}", "", "<details><summary>展开答案与解析</summary>", "", f"**答案：** {practice.answer}", "", f"**解析：** {practice.explanation}", "", "</details>", ""])
+            lines.extend([f"**{_practice_label(practice.kind)}题（{practice.difficulty}）：** {practice.prompt}", "", "<details><summary>展开答案与解析</summary>", "", f"**答案：** {practice.answer}", "", f"**解析：** {practice.explanation}", "", "</details>", ""])
         lines.extend([f"**学习重点：** {unit.priority_label}", f"**评价信息：** {unit.assessment_signal}", ""])
         if unit.source_refs:
             lines.append("**来源：** " + "；".join(_md_source(item) for item in unit.source_refs))
@@ -822,26 +1411,64 @@ def render_markdown(guide: StudyGuide) -> str:
 
 
 def render_html(guide: StudyGuide) -> str:
-    """Render the same guide as a standalone browser document."""
+    """Render a standalone guide while keeping answers collapsed."""
 
-    body = render_markdown(guide)
-    # Keep the export dependency-free.  The web app provides the interactive
-    # version; this standalone output intentionally preserves readable HTML.
-    paragraphs = []
-    for line in body.splitlines():
-        if line.startswith("# "):
-            paragraphs.append(f"<h1>{html.escape(line[2:])}</h1>")
-        elif line.startswith("## "):
-            paragraphs.append(f"<h2>{html.escape(line[3:])}</h2>")
-        elif line.startswith("### "):
-            paragraphs.append(f"<h3>{html.escape(line[4:])}</h3>")
-        elif line.startswith("> "):
-            paragraphs.append(f"<blockquote>{html.escape(line[2:])}</blockquote>")
-        elif line.startswith("- "):
-            paragraphs.append(f"<li>{html.escape(line[2:])}</li>")
-        elif line and not line.startswith("|") and not line.startswith("<details") and not line.startswith("</details") and not line.startswith("<summary"):
-            paragraphs.append(f"<p>{html.escape(line)}</p>")
-    return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + html.escape(guide.title) + "</title><style>body{max-width:820px;margin:40px auto;padding:0 22px;font:16px/1.8 system-ui,sans-serif;color:#26352c;background:#fbfcf8}h1{line-height:1.25}h2{margin-top:2.3em;border-bottom:1px solid #dbe5dc;padding-bottom:.35em}h3{margin-top:1.6em;color:#315c43}blockquote{margin:16px 0;padding:10px 15px;border-left:4px solid #d47758;background:#fff5ef}li{margin:5px 0}code{background:#eef3ee;padding:2px 4px}</style></head><body>" + "\n".join(paragraphs) + "</body></html>"
+    def esc(value: Any) -> str:
+        return html.escape(_text(value)).replace("\n", "<br>")
+
+    body: list[str] = [
+        f"<h1>{esc(guide.title)}</h1>",
+        f"<p class=\"lead\">预计学习时间：{guide.route.estimated_minutes} 分钟。按路线学习，先想再看答案。</p>",
+    ]
+    if guide.report.status != "complete":
+        body.append("<aside class=\"draft\"><strong>教学草稿</strong>：部分内容仍需模型或人工复核。</aside>")
+    body.extend(
+        [
+            "<h2>先看学习路线</h2>",
+            f"<p class=\"central\">{esc(guide.route.central_question)}</p>",
+            "<h3>学完后你应当能够</h3><ul>" + "".join(f"<li>{esc(item)}</li>" for item in guide.route.outcomes) + "</ul>",
+            f"<p><strong>学习顺序：</strong>{esc(' → '.join(guide.route.chain))}</p>",
+        ]
+    )
+    for index, unit in enumerate(guide.units, 1):
+        body.extend(
+            [
+                f"<article class=\"unit\"><h2>{index}. {esc(unit.title)}</h2>",
+                f"<p class=\"grip\"><strong>先记住：</strong>{esc(unit.one_sentence)}</p>",
+                f"<section><h3>先想 30 秒</h3><p>{esc(unit.question)}</p><p class=\"muted\">先写下你的猜测，再继续阅读。</p></section>",
+                f"<section><h3>为什么要学</h3><p>{esc(unit.why)}</p></section>",
+                f"<section><h3>材料中看什么</h3><p>{esc(unit.material_explanation)}</p></section>",
+                f"<section class=\"teacher\"><h3>教师补充</h3><p>{esc(unit.teacher_increment)}</p></section>",
+                f"<section class=\"bridge\"><h3>导师补链</h3><p>{esc(unit.tutor_bridge)}</p><ol>" + "".join(f"<li>{esc(step)}</li>" for step in unit.step_chain) + "</ol></section>",
+            ]
+        )
+        for example in unit.worked_examples:
+            body.extend(
+                [
+                    f"<section class=\"example\"><h3>{esc(example.title)}</h3>",
+                    f"<p><strong>题目：</strong>{esc(example.question)}</p>",
+                    f"<p>{esc(example.setup)}</p><ol>" + "".join(f"<li>{esc(step)}</li>" for step in example.steps) + "</ol>",
+                    f"<p><strong>答案：</strong>{esc(example.answer)}</p><p><strong>换一个条件：</strong>{esc(example.variation)}</p></section>",
+                ]
+            )
+        if unit.misconceptions:
+            body.append("<section><h3>最容易错在哪里</h3><div class=\"mistakes\">" + "".join(f"<div><b>错误想法</b><p>{esc(item.wrong)}</p></div><div><b>正确判断</b><p>{esc(item.correct)}</p></div><div><b>纠正动作</b><p>{esc(item.correction)}</p></div>" for item in unit.misconceptions) + "</div></section>")
+        body.append("<section><h3>先自己回答</h3>")
+        for practice in unit.practice_items:
+            body.append(
+                f"<div class=\"practice\"><p><strong>{esc(_practice_label(practice.kind))}题：</strong>{esc(practice.prompt)}</p>"
+                f"<details><summary>展开答案与解析</summary><p><strong>答案：</strong>{esc(practice.answer)}</p><p><strong>解析：</strong>{esc(practice.explanation)}</p></details></div>"
+            )
+        body.append("</section></article>")
+    body.extend(["<h2>课后闭卷复习</h2>", f"<p class=\"central\">{esc(' → '.join(guide.route.chain))}</p>"])
+    for index, item in enumerate(guide.review_items, 1):
+        body.append(
+            f"<section class=\"review\"><h3>复习题 {index}</h3><p>{esc(item.prompt)}</p>"
+            f"<details><summary>我已经回答，查看答案</summary><p><strong>答案：</strong>{esc(item.answer)}</p><p><strong>解析：</strong>{esc(item.explanation)}</p></details></section>"
+        )
+    body.append("<h2>来源与状态</h2><p>页面覆盖：%s/%s；时间片段对齐：%s/%s</p>" % (guide.report.covered_pages, guide.report.total_pages, guide.report.aligned_segments, guide.report.total_segments))
+    css = """body{max-width:850px;margin:40px auto;padding:0 22px;font:16px/1.8 system-ui,-apple-system,'PingFang SC',sans-serif;color:#26352c;background:#fbfcf8}h1{line-height:1.25}h2{margin-top:2.3em;border-bottom:1px solid #dbe5dc;padding-bottom:.35em}h3{margin-top:1.4em;color:#315c43}.lead,.muted{color:#718078}.central{color:#2f6848;font-size:1.1em;font-weight:700}.draft{padding:10px 14px;border-left:4px solid #b28a37;background:#fff7df}.grip{padding:10px 14px;border-left:4px solid #c9684e;background:#fff5ef}.unit{margin-top:36px}.teacher{padding:10px 14px;border:1px solid #c9dfcf;background:#f3f9f4}.bridge{padding:10px 14px;border:1px solid #f0d4c8;background:#fffaf7}.example{padding:14px;border:1px solid #e3d4b5;background:#fffcf4}.mistakes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#dce6dd}.mistakes div{padding:9px;background:white}.mistakes b{color:#718078;font-size:.78em}.practice,.review{margin:10px 0;padding:12px 14px;border:1px solid #dce6dd;border-radius:7px;background:#fff}details{margin-top:8px;padding-top:8px;border-top:1px dashed #dce6dd}summary{color:#2f6848;cursor:pointer;font-weight:700}code{background:#eef3ee;padding:2px 4px}@media(max-width:600px){body{margin:22px auto;padding:0 15px}.mistakes{grid-template-columns:1fr}}"""
+    return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + html.escape(guide.title) + f"</title><style>{css}</style></head><body>" + "\n".join(body) + "</body></html>"
 
 
 def load_project_guide(project_dir: str | Path) -> StudyGuide:

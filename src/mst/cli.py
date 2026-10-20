@@ -29,6 +29,14 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("project", type=Path)
     init.add_argument("--subject", default="generic")
 
+    quickstart = sub.add_parser("quickstart", help="create a project and generate a guide from course files")
+    quickstart.add_argument("project", type=Path)
+    quickstart.add_argument("inputs", nargs="+", type=Path)
+    quickstart.add_argument("--subject", default="generic")
+    quickstart.add_argument("--provider", choices=("none", "mock", "openai"), default="none")
+    quickstart.add_argument("--model", default="gpt-5-mini")
+    quickstart.add_argument("--strict", action="store_true")
+
     ingest = sub.add_parser("ingest", help="record input files without modifying them")
     ingest.add_argument("project", type=Path)
     ingest.add_argument("inputs", nargs="+", type=Path)
@@ -80,6 +88,30 @@ def main(argv: list[str] | None = None) -> int:
         manifest = init_project(args.project, args.subject)
         print(f"Initialized {args.project} ({manifest['profile']})")
         return 0
+    if args.command == "quickstart":
+        if not project_paths(args.project)["manifest"].exists():
+            manifest = init_project(args.project, args.subject)
+            print(f"Initialized {args.project} ({manifest['profile']})")
+        manifest = ingest_project(args.project, args.inputs)
+        print(f"Recorded {len(manifest['source_manifest'])} source(s)")
+        data = build_scaffold(args.project)
+        print(f"Built scaffold with {len(data['pages'])} visual source(s)")
+        provider = None
+        if args.provider == "mock":
+            from .providers import MockProvider
+
+            provider = MockProvider()
+        elif args.provider == "openai":
+            from .providers import OpenAIProvider
+
+            provider = OpenAIProvider(args.model)
+        guide = generate_project_guide(args.project, provider)
+        report = validate_study_guide(guide, strict=args.strict)
+        print(f"Generated {guide.report.status} study guide: {len(guide.units)} unit(s)")
+        print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        if args.strict and (report.errors or guide.report.status != "complete"):
+            return 1
+        return 0
     if args.command == "ingest":
         manifest = ingest_project(args.project, args.inputs)
         print(f"Recorded {len(manifest['source_manifest'])} source(s)")
@@ -109,7 +141,9 @@ def main(argv: list[str] | None = None) -> int:
         for item in report.diagnostics:
             print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
-        return 1 if report.errors and args.strict else 0
+        if args.strict and (report.errors or guide.report.status != "complete"):
+            return 1
+        return 0
     if args.command == "validate":
         map_path = args.map or (project_paths(args.project)["lesson_map"] if args.project else None)
         if map_path is None:
@@ -122,12 +156,19 @@ def main(argv: list[str] | None = None) -> int:
         for item in report.diagnostics:
             print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        if args.strict and isinstance(raw, dict) and raw.get("guide_kind") == "student-study-guide" and (
+            report.errors or raw.get("generation_report", {}).get("status") != "complete"
+        ):
+            return 1
         return 1 if report.errors else 0
     if args.command == "validate-guide":
-        report = validate_study_guide(read_json(args.map), strict=args.strict)
+        raw = read_json(args.map)
+        report = validate_study_guide(raw, strict=args.strict)
         for item in report.diagnostics:
             print(f"{item.severity.upper()} {item.path}: {item.message} [{item.code}]")
         print(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
+        if args.strict and (report.errors or raw.get("generation_report", {}).get("status") != "complete"):
+            return 1
         return 1 if report.errors else 0
     if args.command == "export":
         if args.format == "md" and not project_paths(args.project)["study_guide"].exists():

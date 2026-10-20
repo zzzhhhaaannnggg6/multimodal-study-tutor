@@ -16,6 +16,9 @@
 - 原生 HTML/CSS/JS 的学习路线与闭卷复习界面；
 - 脱敏最小样例和 GitHub Actions 检查。
 
+当前讲义生成器会把每个知识单元组织成“先想 → 看材料 → 教师补充 → 导师补链 → 完整例题 → 易错对照 → 回忆/过程/迁移练习”。
+计算机系统 profile 还会从课件中识别常见的 RISC-V 执行、进制转换和二进制运算例题；没有足够材料时会保留“待补充”状态，不会伪造数值或教师观点。
+
 `build` 仍然只生成“输入清点与来源骨架”。`generate` 会把已有的
 `lesson-map` 转换成学生可以直接阅读的 `study-guide`。没有文本模型时，输出会明确标为“教学草稿”，不会把摘要冒充成完整课程。
 
@@ -42,6 +45,8 @@ study serve /tmp/my-lesson
 ```bash
 python -m http.server 8765 --directory web
 ```
+
+macOS 用户也可以双击仓库根目录的 `start-study.command`，选择项目文件夹后直接打开本地学习页面。
 
 `examples/minimal_course` 中的 `.md` 和 `.vtt` 是合成材料，运行 `ingest`、
 `build` 和 `generate` 后会生成页面、时间段和学生讲义；它们不代表真实课程或教师。

@@ -40,8 +40,8 @@
       </section>
 
       <section class="upload-box card" id="uploadBox">
-        <div><p class="eyebrow">第一次使用？</p><h2>把课程材料交给助手</h2><p>选择课件、阅读材料和教师转写。文件只保存在当前电脑；生成后会自动回到学习路线。</p></div>
-        <div class="upload-controls"><input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /><button class="primary-button" id="generateButton" type="button">生成我的自学讲义</button><span class="upload-message" id="uploadMessage">没有选文件时，可以继续阅读当前讲义。</span></div>
+        <div><p class="eyebrow">第一次使用？</p><h2>导入材料，生成学习路线</h2><p>选课件和教师转写即可。原文件只保存在当前电脑，生成后直接进入路线。</p></div>
+        <div class="upload-controls"><input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /><button class="primary-button" id="generateButton" type="button">生成自学讲义</button><span class="upload-message" id="uploadMessage">也可以先打开已有讲义。</span></div>
       </section>
 
       <section id="routeView" class="view" aria-labelledby="routeHeading">
@@ -56,8 +56,10 @@
             </div>
           </div>
           <aside class="route-side card">
-            <span class="label">预计用时</span><strong class="time" id="estimatedTime">—</strong><span class="muted">按单元逐步学习，可以随时暂停。</span>
+            <span class="label">预计用时</span><strong class="time" id="estimatedTime">—</strong><span class="muted">按单元学习，完成进度会保存在这台电脑。</span>
+            <div class="progress-block" aria-live="polite"><div class="progress-track"><span id="progressBar"></span></div><span id="progressText" class="progress-text">尚未开始</span></div>
             <button class="primary-button" id="startLearning" type="button">从第一个知识点开始</button>
+            <button class="secondary-button resume-button" id="resumeLearning" type="button" hidden>继续上次学习</button>
           </aside>
         </div>
         <div class="section-heading"><div><p class="eyebrow">学习顺序</p><h2>把知识连成一条线</h2></div><span id="unitCount" class="muted">—</span></div>
