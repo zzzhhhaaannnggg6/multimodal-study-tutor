@@ -238,6 +238,7 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
                 diagram_nodes=diagram_nodes,
                 diagram_edges=diagram_edges,
             )
+            domain = signals.get("domain_signals", {})
             title = text.split(" ", 1)[0] if text else f"Slide {page_number}"
             pages.append(
                 VisualFrame(
@@ -258,6 +259,8 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
                         *signals["formula_candidates"][:3],
                         *signals["diagram_keywords"][:5],
                         *signals["diagram_edges"][:3],
+                        *domain.get("instruction_tokens", [])[:3],
+                        *domain.get("datapath_stages", [])[:5],
                     ],
                     needs_visual_review=signals["review_required"],
                     metadata={"visual_analysis": signals},
@@ -290,6 +293,7 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
     for number, text in enumerate(texts, 1):
         first_line = next((line.strip() for line in text.splitlines() if line.strip()), f"Page {number}")
         signals = visual_signals(text)
+        domain = signals.get("domain_signals", {})
         pages.append(
             VisualFrame(
                 visual_id=f"{source.stem}::p{number:03d}",
@@ -301,7 +305,12 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
                 notes="PDF text extracted; figures and scanned text may require visual/OCR review.",
                 visual_kind=signals["kind"],
                 visual_summary=signals["summary"],
-                visual_evidence=[*signals["formula_candidates"][:3], *signals["code_lines"][:3]],
+                visual_evidence=[
+                    *signals["formula_candidates"][:3],
+                    *signals["code_lines"][:3],
+                    *domain.get("instruction_tokens", [])[:3],
+                    *domain.get("datapath_stages", [])[:5],
+                ],
                 needs_visual_review=True if signals["review_required"] else not bool(text.strip()),
                 metadata={"visual_analysis": signals},
             )
@@ -324,6 +333,7 @@ def extract_markdown_pages(path: str | Path) -> list[VisualFrame]:
         number = len(frames) + 1
         text = " ".join(current_lines).strip()
         signals = visual_signals(text)
+        domain = signals.get("domain_signals", {})
         frames.append(
             VisualFrame(
                 visual_id=f"{source.stem}::p{number:03d}",
@@ -334,7 +344,12 @@ def extract_markdown_pages(path: str | Path) -> list[VisualFrame]:
                 status="covered" if text else "unresolved",
                 visual_kind=signals["kind"],
                 visual_summary=signals["summary"],
-                visual_evidence=[*signals["formula_candidates"][:3], *signals["code_lines"][:3]],
+                visual_evidence=[
+                    *signals["formula_candidates"][:3],
+                    *signals["code_lines"][:3],
+                    *domain.get("instruction_tokens", [])[:3],
+                    *domain.get("datapath_stages", [])[:5],
+                ],
                 needs_visual_review=signals["review_required"],
                 metadata={"visual_analysis": signals},
             )

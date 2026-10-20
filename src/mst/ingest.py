@@ -15,6 +15,7 @@ from .alignment import align_speech_to_visuals
 from .multimodal import annotate_speech_metadata
 from .io import project_paths, read_json, write_json
 from .models import SpeechSegment, VisualFrame
+from .profiles import PROFILES
 
 SUPPORTED_EXTENSIONS = {
     ".pptx": "slides",
@@ -95,7 +96,7 @@ def init_project(project_dir: str | Path, subject: str = "generic") -> dict[str,
         "schema_version": "1.0",
         "project_id": paths["root"].name,
         "subject": subject,
-        "profile": subject if subject in {"generic", "computer-systems"} else "generic",
+        "profile": subject if subject in PROFILES else "generic",
         "source_manifest": [],
         "privacy": {"originals_read_only": True, "publish_originals": False},
     }

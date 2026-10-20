@@ -39,6 +39,9 @@ def test_visual_signals_keep_code_formula_and_diagram_cues() -> None:
     assert result["code_lines"]
     assert result["formula_candidates"]
     assert result["arrow_count"] == 1
+    assert result["domain_signals"]["domain"] == "computer-systems"
+    assert "ALU" in result["domain_signals"]["datapath_stages"]
+    assert result["domain_signals"]["instruction_tokens"]
 
 
 def test_speech_roles_distinguish_definition_correction_and_assessment() -> None:
@@ -60,6 +63,7 @@ def test_semantic_alignment_prefers_matching_page_and_keeps_supplement() -> None
     assert aligned[0].alignment is not None
     assert aligned[0].alignment.visual_ids == ["p1"]
     assert aligned[0].alignment.status == "aligned"
+    assert aligned[0].metadata["alignment_analysis"]["candidates"][0]["visual_id"] == "p1"
     assert aligned[1].alignment is not None
     assert aligned[1].alignment.status == "supplement"
 

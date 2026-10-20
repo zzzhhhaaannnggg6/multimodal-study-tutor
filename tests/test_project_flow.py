@@ -10,6 +10,7 @@ from mst.models import LessonMap
 from mst.reconstruct import build_scaffold
 from mst.reconstruct import inspect_project_visuals
 from mst.validation import validate_lesson_map
+from mst.profiles import list_profiles
 
 
 def test_fixture_is_traceable() -> None:
@@ -89,3 +90,10 @@ def test_agent_keeps_query_grounded() -> None:
     hits = agent.query_claims("机制")
     assert hits and hits[0]["claim_id"] == "claim::model"
     assert "claim::model" in agent.explain("机制")
+
+
+def test_common_subject_profiles_keep_domain_specific_learning_chains() -> None:
+    profiles = {item.profile_id: item for item in list_profiles()}
+    assert {"generic", "computer-systems", "mathematics", "physics", "history"} <= set(profiles)
+    assert "units" in profiles["physics"].trace_template
+    assert "source/evidence" in profiles["history"].trace_template

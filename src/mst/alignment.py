@@ -89,6 +89,14 @@ def align_speech_to_visuals(
             "best_score": best_score,
             "margin": margin,
             "strong_anchors": sorted(strong),
+            "candidates": [
+                {
+                    "visual_id": candidate_page.visual_id,
+                    "score": candidate_score,
+                    "shared_anchors": sorted(candidate_shared)[:12],
+                }
+                for candidate_score, candidate_page, candidate_shared, _candidate_strong in candidates[:5]
+            ],
         }
     return list(segments)
 

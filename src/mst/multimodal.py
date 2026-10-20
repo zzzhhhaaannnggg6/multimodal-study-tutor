@@ -30,6 +30,9 @@ _CODE_RE = re.compile(
 )
 _ARROW_RE = re.compile(r"(?:->|=>|→|⇒|↦|←|⇐|⟶|⟵)")
 _TABLE_RE = re.compile(r"\|[^\n|]+\||(?:\t[^\n\t]+){2,}")
+_RISCV_RE = re.compile(r"\b(?:addi|add|sub|mul|div|lw|sw|ld|sd|beq|bne|jal|jalr|and|or|xor|slli|srli|lui|auipc)\b(?:\s+[^\s,]+(?:\s*,\s*|\s+)){1,3}[^\s,]+", re.IGNORECASE)
+_BINARY_RE = re.compile(r"\b[01]{3,}(?:\.[01]+)?(?:₂|_2|b)?\b")
+_HEX_RE = re.compile(r"\b[0-9A-Fa-f]{2,}(?:\.[0-9A-Fa-f]+)?(?:₁₆|_16|h)?\b")
 
 _STOPWORDS = {
     "the", "and", "that", "this", "with", "from", "into", "then", "when",
@@ -127,6 +130,59 @@ def speech_role_label(role: str) -> str:
     return _ROLE_LABELS.get(role, _ROLE_LABELS["general"])
 
 
+def _computer_systems_signals(text: str) -> dict[str, Any] | None:
+    """Extract domain-specific inspection cues without solving the page."""
+
+    compact = " ".join(str(text or "").split())
+    lower = compact.lower()
+    instruction_tokens = _unique(match.group(0) for match in _RISCV_RE.finditer(compact))
+    datapath_labels = [
+        ("PC", ("pc", "程序计数器")),
+        ("指令存储器", ("instruction memory", "指令存储器", "imem")),
+        ("寄存器堆", ("register file", "寄存器堆", "regfile")),
+        ("立即数生成", ("immgen", "immediate", "立即数")),
+        ("ALU", ("alu",)),
+        ("数据存储器", ("data memory", "数据存储器", "dmem")),
+        ("写回", ("write back", "writeback", "写回")),
+        ("下一条 PC", ("next pc", "nextpc", "下一条 pc")),
+    ]
+    stages = [label for label, aliases in datapath_labels if any(alias in lower for alias in aliases)]
+    field_names = _unique(
+        field
+        for field in ("opcode", "funct3", "funct7", "rd", "rs1", "rs2", "immediate", "imm", "立即数", "操作码")
+        if field in lower
+    )
+    timing = _unique(
+        term
+        for term in ("fetch", "decode", "execute", "memory", "write back", "clock", "cycle", "取指", "译码", "执行", "访存", "时钟")
+        if term in lower
+    )
+    binary = _unique(match.group(0) for match in _BINARY_RE.finditer(compact))
+    hexadecimal = _unique(match.group(0) for match in _HEX_RE.finditer(compact) if not re.fullmatch(r"[A-Za-z]{2,}", match.group(0)))
+    is_cs = bool(instruction_tokens or len(stages) >= 2 or field_names or binary or hexadecimal or "risc-v" in lower or "datapath" in lower)
+    if not is_cs:
+        return None
+    if instruction_tokens:
+        trace = "读寄存器/立即数 → 执行运算或访存 → 写回目标 → 检查下一条 PC"
+    elif len(stages) >= 2:
+        trace = "从 PC/输入开始 → 沿数据通路经过部件 → 在控制信号选择的位置写回"
+    elif field_names:
+        trace = "先按字段切分指令 → 解释每个字段 → 检查寄存器、立即数和控制动作"
+    else:
+        trace = "先确定位宽和表示规则 → 展开每一位/每一阶段 → 检查范围、进位或时序"
+    return {
+        "domain": "computer-systems",
+        "instruction_tokens": instruction_tokens[:20],
+        "datapath_stages": stages,
+        "instruction_fields": field_names,
+        "timing_terms": timing,
+        "binary_literals": binary[:20],
+        "hex_literals": hexadecimal[:20],
+        "recommended_trace": trace,
+        "needs_domain_review": bool(instruction_tokens or field_names or len(stages) >= 2),
+    }
+
+
 def visual_signals(
     text: str,
     *,
@@ -147,6 +203,7 @@ def visual_signals(
     formula_candidates = _unique(match.group(0) for match in _FORMULA_RE.finditer(source))
     arrows = len(_ARROW_RE.findall(source)) + int(connector_count)
     table_hits = len(_TABLE_RE.findall(source))
+    domain_signals = _computer_systems_signals(source)
     lower = source.lower()
     diagram_keywords = _unique(
         keyword
@@ -231,6 +288,7 @@ def visual_signals(
         "confidence": confidence,
         "review_required": bool(review_reasons),
         "review_reasons": review_reasons,
+        "domain_signals": domain_signals or {},
     }
 
 

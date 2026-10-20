@@ -133,7 +133,9 @@
 
   function renderSources() {
     const report = state.guide.report || {};
-    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面文字覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>需要视觉复核</b><span>${report.visual_review_pages ?? 0} 页</span></div><div><b>时间片段已对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div><div><b>课堂补充片段</b><span>${report.supplement_segments ?? 0}</span></div>`;
+    const roleLabels = { assessment: "评价", correction: "纠错", definition: "定义", derivation: "推导", example: "例题", emphasis: "强调", question: "提问", general: "讲解" };
+    const roleText = Object.entries(report.speech_role_counts || {}).map(([role, count]) => `${roleLabels[role] || role} ${count}`).join("；") || "暂无语音片段";
+    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面文字覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>需要视觉复核</b><span>${report.visual_review_pages ?? 0} 页</span></div><div><b>时间片段已对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div><div><b>课堂补充片段</b><span>${report.supplement_segments ?? 0}</span></div><div><b>语音内容分类</b><span>${esc(roleText)}</span></div>`;
     $("sourceList").innerHTML = renderSourceList(list(state.guide.source_index));
   }
 

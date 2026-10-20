@@ -29,6 +29,27 @@ PROFILES: dict[str, StudyProfile] = {
         ("register", "ALU", "memory", "PC", "signal", "bit width"),
         ("trace", "bit-level calculation", "datapath comparison"),
     ),
+    "mathematics": StudyProfile(
+        "mathematics",
+        "Mathematics",
+        "conditions/definitions -> representation/formula -> operations -> result -> check",
+        ("definition", "domain", "formula", "proof", "counterexample", "units"),
+        ("retrieval", "derivation", "worked calculation", "transfer"),
+    ),
+    "physics": StudyProfile(
+        "physics",
+        "Physics",
+        "quantities/units -> model/law -> substitution/derivation -> result -> limits",
+        ("quantity", "unit", "law", "model", "measurement", "uncertainty"),
+        ("retrieval", "derivation", "unit check", "estimate", "transfer"),
+    ),
+    "history": StudyProfile(
+        "history",
+        "History and social sciences",
+        "question/context -> claim -> source/evidence -> causal relation -> consequence/limit",
+        ("period", "actor", "source", "claim", "cause", "consequence"),
+        ("chronology", "evidence comparison", "causal explanation", "counterclaim"),
+    ),
 }
 
 

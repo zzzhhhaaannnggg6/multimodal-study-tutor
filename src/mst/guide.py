@@ -70,6 +70,12 @@ def _profile_chain(profile: str, existing: Sequence[str]) -> list[str]:
             "沿数据通路执行运算或访问",
             "确定结果写回位置以及下一条 PC",
         ]
+    elif profile == "mathematics":
+        defaults = ["写清条件和定义", "选择表示或公式并逐步运算", "检查结果、定义域和边界"]
+    elif profile == "physics":
+        defaults = ["列出物理量、单位和已知条件", "选择模型并代入或推导", "检查单位、数量级和适用范围"]
+    elif profile == "history":
+        defaults = ["明确问题和历史语境", "用来源证据支持主张", "检查因果链、反例和影响范围"]
     else:
         defaults = [
             "找出材料直接给出的对象或条件",
@@ -113,6 +119,14 @@ def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
         for cue in getattr(item, "visual_evidence", [])
         if _text(cue)
     )
+    domain_rows = [
+        item.metadata.get("visual_analysis", {}).get("domain_signals")
+        for item in pages
+        if isinstance(getattr(item, "metadata", None), Mapping)
+        and isinstance(item.metadata.get("visual_analysis"), Mapping)
+        and isinstance(item.metadata.get("visual_analysis", {}).get("domain_signals"), Mapping)
+        and item.metadata.get("visual_analysis", {}).get("domain_signals")
+    ]
     result = (
         f"材料先给出：{joined}\n"
         f"阅读动作：先圈出“{title}”涉及的对象、条件或符号，再对照下面的步骤，"
@@ -122,6 +136,17 @@ def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
         result += "\n材料视觉线索：" + "；".join(visual_notes[:2])
     if evidence:
         result += "\n可先核对的图/式/代码线索：" + "；".join(evidence[:8])
+    if domain_rows:
+        domain = domain_rows[0]
+        trace = _text(domain.get("recommended_trace"))
+        stages = _dedupe(domain.get("datapath_stages", []))
+        fields = _dedupe(domain.get("instruction_fields", []))
+        if trace:
+            result += "\n计算机系统检查顺序：" + trace
+        if stages:
+            result += "\n检测到的数据通路部件：" + " → ".join(stages)
+        if fields:
+            result += "\n检测到的指令字段线索：" + "、".join(fields)
     if any(getattr(item, "needs_visual_review", False) for item in pages):
         result += "\n【待确认】页面含图形、公式或截图，文字线索不能替代对原图的复核。"
     return result
