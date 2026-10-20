@@ -127,6 +127,12 @@ def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
         and isinstance(item.metadata.get("visual_analysis", {}).get("domain_signals"), Mapping)
         and item.metadata.get("visual_analysis", {}).get("domain_signals")
     ]
+    visual_analyses = [
+        item.metadata.get("visual_analysis")
+        for item in pages
+        if isinstance(getattr(item, "metadata", None), Mapping)
+        and isinstance(item.metadata.get("visual_analysis"), Mapping)
+    ]
     result = (
         f"材料先给出：{joined}\n"
         f"阅读动作：先圈出“{title}”涉及的对象、条件或符号，再对照下面的步骤，"
@@ -136,6 +142,17 @@ def _material_reading(pages: Sequence[VisualFrame], title: str) -> str:
         result += "\n材料视觉线索：" + "；".join(visual_notes[:2])
     if evidence:
         result += "\n可先核对的图/式/代码线索：" + "；".join(evidence[:8])
+    code_rows = [row for analysis in visual_analyses for row in analysis.get("code_candidates", []) if isinstance(row, Mapping)]
+    formula_rows = [row for analysis in visual_analyses for row in analysis.get("formula_relations", []) if isinstance(row, Mapping)]
+    if code_rows:
+        result += "\n代码/指令候选（需对照原图确认）：" + "；".join(
+            f"{_text(row.get('opcode'))}({', '.join(_text(item) for item in row.get('operands', []))})"
+            for row in code_rows[:8]
+        )
+    if formula_rows:
+        result += "\n公式关系候选（需核对上下标和符号）：" + "；".join(
+            _text(row.get("raw")) for row in formula_rows[:6]
+        )
     if domain_rows:
         domain = domain_rows[0]
         trace = _text(domain.get("recommended_trace"))

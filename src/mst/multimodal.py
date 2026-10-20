@@ -16,23 +16,59 @@ from typing import Any, Iterable, Mapping, Sequence
 
 _ASCII_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.$:+\-/]*|\d+(?:\.\d+)?")
 _HAN_RE = re.compile(r"[\u3400-\u9fff]+")
+_FORMULA_ATOM = r"(?:[A-Za-z](?:[_0-9]{0,3})?|\d+(?:\.\d+)?)"
+_FORMULA_EXPR = rf"{_FORMULA_ATOM}(?:\s*[+\-*/^×÷]\s*{_FORMULA_ATOM})*"
 _FORMULA_RE = re.compile(
-    r"(?:\\(?:frac|sum|prod|int|sqrt|cdot|times|pm)|"
-    r"[A-Za-z][A-Za-z0-9_]*\s*(?:=|:=|\+|-|\*|/|\^|≤|≥|<|>)\s*"
-    r"[A-Za-z0-9_(\[\-+]|"
-    r"\d+\s*[×x*÷/]\s*\d+|"
+    rf"(?:\\(?:frac|sum|prod|int|sqrt|cdot|times|pm)|"
+    rf"\b{_FORMULA_EXPR}\s*(?:=|:=|≤|≥|≠|<|>)\s*{_FORMULA_EXPR}\b|"
+    rf"\b\d+(?:\.\d+)?\s*[+\-*/^×÷]\s*\d+(?:\.\d+)?\b|"
     r"[∑∏∫√±≤≥≠∞→←])"
 )
 _CODE_RE = re.compile(
-    r"(?:\b(?:addi|sub|mul|muli|div|lw|sw|ld|sd|beq|jal|jalr|and|or|xor|slli|srli)\b|"
-    r"\b(?:int|float|double|char|return|if|else|for|while|always_ff|assign|module)\b|"
+    r"(?:\b(?:int|float|double|char|return|if|else|for|while|always_ff|assign|module)\b|"
     r"\b[A-Za-z_][A-Za-z0-9_]*\s*(?:\+=|-=|\*=|/=|=)\s*[^=])"
 )
 _ARROW_RE = re.compile(r"(?:->|=>|→|⇒|↦|←|⇐|⟶|⟵)")
 _TABLE_RE = re.compile(r"\|[^\n|]+\||(?:\t[^\n\t]+){2,}")
-_RISCV_RE = re.compile(r"\b(?:addi|add|sub|mul|div|lw|sw|ld|sd|beq|bne|jal|jalr|and|or|xor|slli|srli|lui|auipc)\b(?:\s+[^\s,]+(?:\s*,\s*|\s+)){1,3}[^\s,]+", re.IGNORECASE)
-_BINARY_RE = re.compile(r"\b[01]{3,}(?:\.[01]+)?(?:₂|_2|b)?\b")
-_HEX_RE = re.compile(r"\b[0-9A-Fa-f]{2,}(?:\.[0-9A-Fa-f]+)?(?:₁₆|_16|h)?\b")
+_RISCV_OPCODE_RE = re.compile(
+    r"\b(?:addi|add|sub|mul|muli|div|lw|sw|ld|sd|beq|bne|jal|jalr|and|or|xor|slli|srli|lui|auipc)\b",
+    re.IGNORECASE,
+)
+_RISCV_OPERAND_RE = re.compile(
+    r"-?(?:0x[0-9a-f]+|0b[01]+|\d+)(?:\([A-Za-z][A-Za-z0-9_.$]*\))?"
+    r"|[A-Za-z_.$][A-Za-z0-9_.$]*",
+    re.IGNORECASE,
+)
+_RISCV_OPERAND_COUNTS = {
+    "addi": 3,
+    "add": 3,
+    "sub": 3,
+    "mul": 3,
+    "muli": 3,
+    "div": 3,
+    "and": 3,
+    "or": 3,
+    "xor": 3,
+    "slli": 3,
+    "srli": 3,
+    "lw": 2,
+    "sw": 2,
+    "ld": 2,
+    "sd": 2,
+    "beq": 3,
+    "bne": 3,
+    "jal": 2,
+    "jalr": 2,
+    "lui": 2,
+    "auipc": 2,
+}
+_RISCV_REGISTER_RE = re.compile(
+    r"(?:x(?:0|[1-9]|[12]\d|3[01])|r(?:0|[1-9]|[12]\d|3[01])|"
+    r"zero|ra|sp|gp|tp|fp|a[0-7]|t[0-6]|s(?:[0-9]|1[01]))$",
+    re.IGNORECASE,
+)
+_BINARY_RE = re.compile(r"\b(?:[01]{8,}(?:\.[01]+)?(?:₂|_2|b)?|[01]{3,}(?:₂|_2|b))\b")
+_HEX_RE = re.compile(r"\b(?:0x[0-9A-Fa-f]+|(?=[0-9A-Fa-f]*[A-Fa-f])[0-9A-Fa-f]{2,}(?:\.[0-9A-Fa-f]+)?(?:₁₆|_16|h)?)\b")
 
 _STOPWORDS = {
     "the", "and", "that", "this", "with", "from", "into", "then", "when",
@@ -135,7 +171,13 @@ def _computer_systems_signals(text: str) -> dict[str, Any] | None:
 
     compact = " ".join(str(text or "").split())
     lower = compact.lower()
-    instruction_tokens = _unique(match.group(0) for match in _RISCV_RE.finditer(compact))
+
+    def contains_term(term: str) -> bool:
+        if any("\u3400" <= char <= "\u9fff" for char in term):
+            return term in lower
+        return bool(re.search(rf"(?<![a-z0-9]){re.escape(term.lower())}(?![a-z0-9])", lower))
+
+    instruction_tokens = _unique(row["raw"] for row in _code_candidates(compact))
     datapath_labels = [
         ("PC", ("pc", "程序计数器")),
         ("指令存储器", ("instruction memory", "指令存储器", "imem")),
@@ -146,20 +188,20 @@ def _computer_systems_signals(text: str) -> dict[str, Any] | None:
         ("写回", ("write back", "writeback", "写回")),
         ("下一条 PC", ("next pc", "nextpc", "下一条 pc")),
     ]
-    stages = [label for label, aliases in datapath_labels if any(alias in lower for alias in aliases)]
+    stages = [label for label, aliases in datapath_labels if any(contains_term(alias) for alias in aliases)]
     field_names = _unique(
         field
         for field in ("opcode", "funct3", "funct7", "rd", "rs1", "rs2", "immediate", "imm", "立即数", "操作码")
-        if field in lower
+        if contains_term(field)
     )
     timing = _unique(
         term
         for term in ("fetch", "decode", "execute", "memory", "write back", "clock", "cycle", "取指", "译码", "执行", "访存", "时钟")
-        if term in lower
+        if contains_term(term)
     )
     binary = _unique(match.group(0) for match in _BINARY_RE.finditer(compact))
     hexadecimal = _unique(match.group(0) for match in _HEX_RE.finditer(compact) if not re.fullmatch(r"[A-Za-z]{2,}", match.group(0)))
-    is_cs = bool(instruction_tokens or len(stages) >= 2 or field_names or binary or hexadecimal or "risc-v" in lower or "datapath" in lower)
+    is_cs = bool(instruction_tokens or len(stages) >= 2 or field_names or binary or hexadecimal or contains_term("risc-v") or contains_term("datapath"))
     if not is_cs:
         return None
     if instruction_tokens:
@@ -183,6 +225,79 @@ def _computer_systems_signals(text: str) -> dict[str, Any] | None:
     }
 
 
+def _code_candidates(source: str) -> list[dict[str, Any]]:
+    """Extract only instruction-shaped candidates with plausible operands.
+
+    Opcode names such as ``and`` and ``or`` are ordinary words in lecture
+    prose.  A raw regex match is therefore not enough: require the expected
+    operand count and register/immediate shapes before exposing a candidate to
+    the learner-facing draft.
+    """
+
+    def is_register(value: str) -> bool:
+        return bool(_RISCV_REGISTER_RE.fullmatch(value.strip()))
+
+    def is_immediate(value: str) -> bool:
+        return bool(re.fullmatch(r"-?(?:0x[0-9a-f]+|0b[01]+|\d+)", value.strip(), re.IGNORECASE))
+
+    def is_memory(value: str) -> bool:
+        return bool(
+            re.fullmatch(
+                r"-?(?:0x[0-9a-f]+|\d+)\((?:x(?:0|[1-9]|[12]\d|3[01])|"
+                r"r(?:0|[1-9]|[12]\d|3[01])|zero|ra|sp|gp|tp|fp|a[0-7]|"
+                r"t[0-6]|s(?:[0-9]|1[01]))\)",
+                value.strip(),
+                re.IGNORECASE,
+            )
+        )
+
+    def valid_operands(opcode: str, operands: list[str]) -> bool:
+        expected = _RISCV_OPERAND_COUNTS.get(opcode.lower())
+        if expected is None or len(operands) != expected:
+            return False
+        opcode = opcode.lower()
+        if opcode in {"lw", "sw", "ld", "sd", "jalr"}:
+            return is_register(operands[0]) and is_memory(operands[1])
+        if opcode in {"beq", "bne"}:
+            return is_register(operands[0]) and is_register(operands[1]) and bool(
+                re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*|-?(?:0x[0-9a-f]+|0b[01]+|\d+)", operands[2], re.IGNORECASE)
+            )
+        if opcode in {"jal"}:
+            return is_register(operands[0]) and bool(re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$]*|-?(?:0x[0-9a-f]+|0b[01]+|\d+)", operands[1], re.IGNORECASE))
+        if opcode in {"lui", "auipc"}:
+            return is_register(operands[0]) and is_immediate(operands[1])
+        if opcode in {"addi", "muli", "slli", "srli"}:
+            return is_register(operands[0]) and is_register(operands[1]) and is_immediate(operands[2])
+        return all(is_register(operand) for operand in operands)
+
+    rows: list[dict[str, Any]] = []
+    for match in _RISCV_OPCODE_RE.finditer(source):
+        opcode = match.group(0)
+        expected = _RISCV_OPERAND_COUNTS[opcode.lower()]
+        remainder = source[match.end() :]
+        operands = [item.group(0) for item in _RISCV_OPERAND_RE.finditer(remainder)][:expected]
+        if not valid_operands(opcode, operands):
+            continue
+        raw = " ".join([opcode, *operands])
+        rows.append({"raw": raw, "opcode": opcode, "operands": operands})
+    return rows[:24]
+
+
+def _formula_candidates(source: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for match in _FORMULA_RE.finditer(source):
+        raw = " ".join(match.group(0).split())
+        relation = re.search(r"(=|:=|≤|≥|≠|<|>)", raw)
+        if relation:
+            lhs = raw[: relation.start()].strip()
+            operator = relation.group(1)
+            rhs = raw[relation.end() :].strip()
+        else:
+            lhs, operator, rhs = raw, None, None
+        rows.append({"raw": raw, "lhs": lhs, "operator": operator, "rhs": rhs})
+    return rows[:20]
+
+
 def visual_signals(
     text: str,
     *,
@@ -195,12 +310,15 @@ def visual_signals(
     """Describe observable visual/text structure without claiming OCR or vision."""
 
     source = "\n".join(str(text or "").splitlines()).strip()
+    code_candidates = _code_candidates(source)
     code_lines = _unique(line.strip() for line in source.splitlines() if _CODE_RE.search(line))
+    code_lines = _unique([*code_lines, *(row["raw"] for row in code_candidates)])
     if not code_lines:
         # PPT XML often flattens line breaks into spaces; retain short code-like
         # fragments so a later model can inspect them as one block.
         code_lines = _unique(match.group(0) for match in _CODE_RE.finditer(source))
     formula_candidates = _unique(match.group(0) for match in _FORMULA_RE.finditer(source))
+    formula_relations = _formula_candidates(source)
     arrows = len(_ARROW_RE.findall(source)) + int(connector_count)
     table_hits = len(_TABLE_RE.findall(source))
     domain_signals = _computer_systems_signals(source)
@@ -277,7 +395,9 @@ def visual_signals(
         "kind": kind,
         "summary": summary,
         "code_lines": code_lines[:20],
+        "code_candidates": code_candidates,
         "formula_candidates": formula_candidates[:12],
+        "formula_relations": formula_relations,
         "diagram_keywords": diagram_keywords,
         "diagram_nodes": nodes[:40],
         "diagram_edges": edges[:40],

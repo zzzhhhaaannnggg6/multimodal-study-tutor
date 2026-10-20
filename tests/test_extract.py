@@ -44,6 +44,19 @@ def test_visual_signals_keep_code_formula_and_diagram_cues() -> None:
     assert result["domain_signals"]["instruction_tokens"]
 
 
+def test_visual_signals_filter_prose_opcode_and_formula_false_positives() -> None:
+    result = visual_signals("Von Neumann and EDVAC 101 pages\nStorage - M")
+    assert result["code_candidates"] == []
+    assert result["formula_relations"] == []
+    assert not result["domain_signals"]
+
+
+def test_visual_signals_keep_structured_riscv_candidates() -> None:
+    result = visual_signals("addi r5, r0, 10\nmuli r5, r5, 2\nlw r6, 0(r5)")
+    assert [row["opcode"] for row in result["code_candidates"]] == ["addi", "muli", "lw"]
+    assert result["code_candidates"][0]["operands"] == ["r5", "r0", "10"]
+
+
 def test_speech_roles_distinguish_definition_correction_and_assessment() -> None:
     result = classify_speech_text("定义是状态机。注意不要把状态和输出混淆，这个期末考试会考。")
     assert {"definition", "correction", "assessment"} <= set(result["roles"])
