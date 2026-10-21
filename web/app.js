@@ -92,7 +92,7 @@
       const location = source.page != null ? `第 ${source.page} 页` : source.start != null ? `${timestamp(source.start)}${source.end != null ? `–${timestamp(source.end)}` : " 起（结束未标注）"}` : "待定位";
       const prefix = state.guide._local_run_id ? `/api/jobs/${encodeURIComponent(state.guide._local_run_id)}/assets/` : "/assets/";
       const image = source.image_path && !state.localGuide ? `<small><a href="${prefix}${String(source.image_path).split("/").map(encodeURIComponent).join("/")}" target="_blank" rel="noopener">查看页面图像</a></small>` : "";
-      return `<li><span class="source-label">${esc(source.label || "材料依据")}</span>${esc(location)}${image}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`;
+      return `<li><span class="source-label">${esc(source.label || "材料依据")}</span>${esc(location)}${image}${source.note ? `<small>${lines(source.note)}</small>` : ""}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`;
     }).join("")}</ul>` : '<p class="muted">暂无可定位来源。</p>';
   }
   function render() {
@@ -103,6 +103,8 @@
     $("draftNotice").hidden = !total || report.status === "complete";
     $("draftText").textContent = `讲义内容仍需核验。${report.visual_review_pages ? `${report.visual_review_pages} 页图示或公式待复核。` : ""}${report.pending_segments ? `${report.pending_segments} 段语音未配准，未加入本课讲解。` : ""}已列出的框架和待补内容不能代替完整课程。`;
     $("centralQuestion").textContent = route.central_question || "导入后显示本课要解决的问题";
+    $("learningSpine").innerHTML = list(route.chain).map((step) => `<li>${esc(step)}</li>`).join("");
+    $("learningSpineNotice").hidden = !total || list(route.chain).length > 0;
     $("estimatedTime").textContent = route.estimated_minutes ? `${route.estimated_minutes} 分钟` : "—";
     $("outcomes").innerHTML = list(route.outcomes).map((item) => `<li>${lines(item)}</li>`).join("");
     $("prerequisites").innerHTML = list(route.prerequisites).map((item) => `<li>${lines(item)}</li>`).join("");
@@ -130,6 +132,14 @@
     const mistakes = list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("");
     $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.index + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label)}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="predict-box"><h3>先想一想</h3><p>${lines(unit.question)}</p><details><summary>需要提示时再打开</summary><p>${lines(list(unit.step_chain)[0])}</p></details></section>${section("为什么要学", `<p>${lines(unit.why)}</p><p class="small-note">先修：${list(unit.prerequisites).map(esc).join("；") || "材料尚未列明"}</p>`)}${section("材料中看什么", `<p>${lines(unit.material_explanation)}</p>`)}${section("教师补充", `<p>${lines(unit.teacher_increment)}</p>`, "teacher")}${section("导师补链：把逻辑补完整", `<p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol>`, "bridge")}${examples}${mistakes ? section("最容易错在哪里", `<div class="mistake-table">${mistakes}</div>`) : ""}${section("现在自己回答", list(unit.practice_items).map((item, i) => practice({...item, unit_id: unit.unit_id}, i)).join("") || "<p>练习仍待补充。</p>")}<div class="unit-footer"><span>评价信息：${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><div class="finish-box"><button class="secondary-button" id="markUnit" type="button">${done(unit) ? "撤销完成标记" : "我完成了这个知识点"}</button><span class="muted">翻到下一页不会自动标为完成。</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${sources(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" ${state.index === 0 ? "disabled" : ""} type="button">← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.index === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
     $("lessonContent").insertAdjacentHTML("afterbegin", '<button class="link-button" data-view="route" type="button">← 返回学习路线</button>');
+    const prerequisites = list(unit.prerequisite_ids).map((id) => units().find((item) => item.unit_id === id)).filter(Boolean);
+    if (prerequisites.length) {
+      const dependencies = list(state.guide.course_plan?.units).find((item) => item.unit_id === unit.unit_id)?.metadata?.planning?.dependencies;
+      $("lessonContent").insertAdjacentHTML("afterbegin", `<aside class="prerequisite-links"><p>这里用到前面学过的知识，卡住时可以返回：</p>${prerequisites.map((item) => {
+        const reason = list(dependencies).find((dependency) => dependency.unit_id === item.unit_id)?.reason;
+        return `<div><button class="link-button" data-return-unit="${esc(item.unit_id)}" type="button">${esc(item.title)} →</button>${reason ? `<small>${esc(reason)}</small>` : ""}</div>`;
+      }).join("")}</aside>`);
+    }
     $("markUnit").onclick = () => { const scroll = window.scrollY; P.complete(state.progress, state.description, unit.unit_id, !done(unit)); save(); render(); window.scrollTo(0, scroll); };
     $("previousUnit").onclick = () => navigate("learn", state.index - 1);
     $("nextUnit").onclick = () => state.index < units().length - 1 ? navigate("learn", state.index + 1) : navigate("review");

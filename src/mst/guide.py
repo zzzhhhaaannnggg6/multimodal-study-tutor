@@ -20,6 +20,8 @@ from .multimodal import classify_speech_text, extract_speech_increment, speech_r
 from .io import active_project_dir, project_paths, read_json, write_json
 from .models import Claim, Evidence, KnowledgeUnit, LessonMap, SpeechSegment, VisualFrame, coerce_lesson_map
 from .profiles import PROFILES
+from .planning import offline_course, order_units, propose_course
+from .teaching import repeated_explanations, specific_steps, teaching_issues
 
 
 def _list(value: Any) -> list[Any]:
@@ -562,6 +564,7 @@ class GuideSourceRef:
     image_path: str | None = None
     verified: bool = False
     status: str = "pending"
+    note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {key: value for key, value in self.__dict__.items() if value is not None}
@@ -579,6 +582,7 @@ class GuideSourceRef:
             image_path=value.get("image_path"),
             verified=bool(value.get("verified", False)),
             status=_text(value.get("status"), "pending"),
+            note=value.get("note"),
         )
 
 
@@ -696,6 +700,7 @@ class LearningUnit:
     status: str = "draft"
     internal_understanding_level: str = "U1"
     internal_assessment_level: str = "E0"
+    prerequisite_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -705,6 +710,7 @@ class LearningUnit:
             "one_sentence": self.one_sentence,
             "why": self.why,
             "prerequisites": self.prerequisites,
+            "prerequisite_ids": self.prerequisite_ids,
             "visual_refs": self.visual_refs,
             "material_explanation": self.material_explanation,
             "teacher_increment": self.teacher_increment,
@@ -730,6 +736,7 @@ class LearningUnit:
             one_sentence=_text(value.get("one_sentence")),
             why=_text(value.get("why")),
             prerequisites=[_text(item) for item in _list(value.get("prerequisites"))],
+            prerequisite_ids=[_text(item) for item in _list(value.get("prerequisite_ids"))],
             visual_refs=[_text(item) for item in _list(value.get("visual_refs") or value.get("visual_ids"))],
             material_explanation=_text(value.get("material_explanation")),
             teacher_increment=_text(value.get("teacher_increment")),
@@ -785,6 +792,7 @@ class GenerationReport:
     unresolved_items: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    planning: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -806,6 +814,7 @@ class GenerationReport:
             unresolved_items=[_text(item) for item in _list(value.get("unresolved_items"))],
             missing_fields=[_text(item) for item in _list(value.get("missing_fields"))],
             warnings=[_text(item) for item in _list(value.get("warnings"))],
+            planning=dict(value.get("planning") or {}),
         )
 
 
@@ -824,6 +833,7 @@ class StudyGuide:
     source_index: list[GuideSourceRef]
     report: GenerationReport
     notes: list[str] = field(default_factory=list)
+    course_plan: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -840,6 +850,7 @@ class StudyGuide:
             "source_index": [item.to_dict() for item in self.source_index],
             "generation_report": self.report.to_dict(),
             "notes": self.notes,
+            "course_plan": self.course_plan,
         }
 
     def to_json(self, *, indent: int = 2) -> str:
@@ -861,6 +872,7 @@ class StudyGuide:
             source_index=[GuideSourceRef.from_dict(item) for item in _list(value.get("source_index")) if isinstance(item, Mapping)],
             report=GenerationReport.from_dict(value.get("generation_report", {})),
             notes=[_text(item) for item in _list(value.get("notes"))],
+            course_plan=dict(value["course_plan"]) if isinstance(value.get("course_plan"), Mapping) else None,
         )
 
     @classmethod
@@ -967,7 +979,7 @@ def _assessment(level: str) -> str:
 
 def _unit_segments(unit: KnowledgeUnit, segments: Sequence[SpeechSegment]) -> list[SpeechSegment]:
     ids = set(unit.segment_ids)
-    return [item for item in segments if item.segment_id in ids and (
+    return [item for item in segments if item.segment_id in ids and item.status not in {"pending", "unresolved", "navigation"} and (
         item.alignment is None or item.alignment.status in {"aligned", "covered", "verified", "supplement"}
     )]
 
@@ -975,65 +987,6 @@ def _unit_segments(unit: KnowledgeUnit, segments: Sequence[SpeechSegment]) -> li
 def _unit_pages(unit: KnowledgeUnit, pages: Sequence[VisualFrame]) -> list[VisualFrame]:
     ids = set(unit.visual_ids)
     return [item for item in pages if item.visual_id in ids]
-
-
-def _infer_units(pages: Sequence[VisualFrame], segments: Sequence[SpeechSegment]) -> list[KnowledgeUnit]:
-    """Create conservative page groups when no semantic unit map exists.
-
-    This keeps a large deck readable offline without pretending that page
-    boundaries are the teacher's conceptual boundaries.  A model can later
-    merge or split these temporary groups.
-    """
-
-    if not pages:
-        if not segments:
-            return []
-        return [
-            KnowledgeUnit(
-                unit_id="inferred::u001",
-                title="课堂转写主线（待拆分）",
-                segment_ids=[item.segment_id for item in segments],
-                understanding_level="U3",
-                exam_evidence_level="E0",
-                logic_chain="课堂问题 → 解释过程 → 应用结果",
-                learner_action="能够复述课堂主线，并把它应用到一个新情境。",
-                transfer_question="请把课堂主线迁移到一个新情境。",
-                status="draft",
-            )
-        ]
-    group_size = 1 if len(pages) <= 8 else max(2, math.ceil(len(pages) / 12))
-    groups: list[KnowledgeUnit] = []
-    for start in range(0, len(pages), group_size):
-        chunk = list(pages[start : start + group_size])
-        ids = {item.visual_id for item in chunk}
-        linked_segments = [
-            item.segment_id
-            for item in segments
-            if item.alignment and item.alignment.status in {"aligned", "covered", "verified"} and ids.intersection(item.alignment.visual_ids)
-        ]
-        first = chunk[0]
-        last = chunk[-1]
-        page_label = f"第 {first.page} 页" if first.page == last.page else f"第 {first.page}–{last.page} 页"
-        raw_topic = " ".join(_text(item.text) for item in chunk)
-        fallback_title = _text(first.title, f"材料片段 {page_label}")
-        title = _infer_topic_title(raw_topic, fallback_title)
-        if title == fallback_title and len(chunk) > 1:
-            title = f"{title}（{page_label}）"
-        groups.append(
-            KnowledgeUnit(
-                unit_id=f"inferred::u{len(groups) + 1:03d}",
-                title=title,
-                visual_ids=[item.visual_id for item in chunk],
-                segment_ids=linked_segments,
-                understanding_level="U3" if len(groups) == 0 else "U2",
-                exam_evidence_level="E0",
-                logic_chain="观察材料 → 识别对象或关系 → 检查结论",
-                learner_action="能够用自己的话解释这一组材料，并说明它在整节课中的作用。",
-                transfer_question="换一个相近案例时，哪一步需要重新检查？",
-                status="draft",
-            )
-        )
-    return groups
 
 
 def _make_example(
@@ -1194,7 +1147,7 @@ def _check_example_completeness(unit: LearningUnit) -> None:
     for example in unit.worked_examples:
         if not example.complete:
             continue
-        if not example.setup or len(example.steps) < 3 or not example.variation:
+        if not example.setup or not specific_steps(example.steps) or not example.variation:
             example.complete = False
             example.title = "例题（条件、步骤或变式待补全）"
 
@@ -1238,7 +1191,7 @@ def _quality_issues(unit: LearningUnit) -> list[str]:
         issues.append("practice_roles")
     if not unit.misconceptions:
         issues.append("misconceptions")
-    return issues
+    return list(dict.fromkeys([*issues, *teaching_issues(unit)]))
 
 
 def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tuple[LearningUnit, str | None]:
@@ -1312,6 +1265,8 @@ def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tu
 def generate_study_guide(
     lesson_map: LessonMap | Mapping[str, Any] | str | Path,
     provider: Any | None = None,
+    *,
+    planning: bool = True,
 ) -> StudyGuide:
     """Generate a learner-facing guide from a validated lesson map.
 
@@ -1328,13 +1283,33 @@ def generate_study_guide(
         if claim.unit_id:
             claims_by_unit.setdefault(claim.unit_id, []).append(claim)
     source_units = list(lesson.units)
-    inferred_units = False
+    plan = None
+    planning_warning = None
     if not source_units and (pages or segments):
-        inferred_units = True
-        source_units = _infer_units(pages, segments)
+        plan = offline_course(lesson)
+        if provider is not None and planning:
+            try:
+                plan = propose_course(lesson, provider)
+            except Exception as exc:
+                planning_warning = f"课程规划未通过检查，已按材料标题保留草稿：{exc}"
+                plan.diagnostics.append(planning_warning)
+        source_units = plan.units
+        if plan.method != "model":
+            for unit in source_units:
+                unit.title = _infer_topic_title("\n".join(page.text or "" for page in _unit_pages(unit, pages)), unit.title)
+    dependency_warning = None
+    if source_units:
+        try:
+            source_units = order_units(source_units)
+        except ValueError as exc:
+            dependency_warning = f"先修关系待核验，保留原知识点顺序：{exc}"
     units: list[LearningUnit] = []
     missing: list[str] = []
     warnings: list[str] = []
+    if planning_warning:
+        warnings.append(planning_warning)
+    if dependency_warning:
+        warnings.append(dependency_warning)
     for issue in lesson.notes.get("extraction_issues", []):
         warnings.append(f"材料未能读取：{issue.get('name', '课程材料')}；{issue.get('error', '请检查格式或补充转写')}。未读取的部分没有进入讲解。")
     unit_titles = {item.unit_id: _text(item.title, item.unit_id) for item in source_units}
@@ -1402,6 +1377,7 @@ def generate_study_guide(
             one_sentence=one_sentence,
             why=why,
             prerequisites=_dedupe(prerequisites),
+            prerequisite_ids=list(source_unit.prerequisite_ids),
             visual_refs=[item.visual_id for item in unit_pages],
             material_explanation=material or "材料文字尚未提取；请查看来源页或等待视觉解析。",
             teacher_increment=teacher or "没有可定位的教师补充片段。",
@@ -1436,6 +1412,10 @@ def generate_study_guide(
                             "end_inferred": segment.metadata.get("end_inferred", False), "text": segment.text}
                            for segment in unit_segments],
                 "claims": [claim.to_dict() for claim in claims_by_unit.get(source_unit.unit_id, [])],
+                "course_context": {"central_question": plan.central_question if plan else lesson.theme,
+                    "learning_order": [{"unit_id": item.unit_id, "title": item.title, "learner_action": item.learner_action} for item in source_units],
+                    "current_unit": source_unit.unit_id, "prerequisites": prerequisites,
+                    "dependency_reasons": source_unit.metadata.get("planning", {}).get("dependencies", [])},
             }, ensure_ascii=False)
             unit, warning = _enrich_with_provider(unit, provider, context)
             if warning:
@@ -1448,9 +1428,16 @@ def generate_study_guide(
         _ensure_practice_set(unit, refs)
         issues = _quality_issues(unit)
         missing.extend(f"{unit.unit_id}.{item}" for item in issues)
-        unit.status = "ready" if provider is not None and not issues and not warning else "draft"
+        unit.status = "ready" if provider is not None and not issues and not warning and not (plan and plan.method == "model") else "draft"
         units.append(unit)
 
+    reused = set(repeated_explanations(units))
+    if reused:
+        warnings.append("多个知识点使用相同的材料解释和导师补链，需要分别补充具体讲解。")
+        for unit in units:
+            if unit.unit_id in reused:
+                unit.status = "draft"
+                missing.append(f"{unit.unit_id}.teaching.repeated_explanation")
     source_index = [_page_ref(item) for item in pages]
     source_index.extend(_segment_ref(item) for item in segments)
     source_index.extend(ref for unit in units for ref in unit.source_refs)
@@ -1460,16 +1447,26 @@ def generate_study_guide(
             for item in source_index
         }.values()
     )
-    outcomes = [item.one_sentence for item in units[:4]]
-    chain = [item.title for item in units]
+    deferred = {item["ref"]: item for item in plan.dispositions} if plan else {}
+    for ref in source_index:
+        disposition = deferred.get(ref.ref)
+        if disposition:
+            if ref.kind == "material":
+                ref.label = {"pending": "内容待补", "navigation": "导航页（建议压缩）", "context": "背景材料（建议压缩）"}[disposition["status"]]
+            elif disposition["status"] == "pending" and ref.label == "教师补充":
+                ref.label = "教师片段待归入讲解"
+            ref.status = disposition["status"]
+            ref.note = disposition["reason"]
+    outcomes = plan.outcomes if plan and plan.method == "model" else [item.one_sentence for item in units[:4]]
+    chain = plan.spine if plan and plan.method == "model" else [item.title for item in units] if len(units) <= 7 else []
     first_question = units[0].question if units else "这节课要把哪些材料变成可以使用的知识？"
-    central_question = _text(lesson.theme, first_question)
+    central_question = plan.central_question if plan and plan.method == "model" else _text(lesson.theme, first_question)
     if central_question == _text(lesson.title) and central_question:
         central_question = f"如何理解并应用“{central_question}”？"
     route = StudyRoute(
         central_question=central_question,
         outcomes=outcomes,
-        prerequisites=list(dict.fromkeys(item for unit in units for item in unit.prerequisites)),
+        prerequisites=plan.prerequisites if plan and plan.method == "model" else list(dict.fromkeys(item for unit in units for item in unit.prerequisites if item not in unit_titles.values())),
         chain=chain,
         estimated_minutes=max(10, min(120, len(units) * 10)),
     )
@@ -1488,8 +1485,12 @@ def generate_study_guide(
     covered_pages = sum(1 for item in pages if item.status in {"covered", "verified", "merged"})
     if not units:
         warnings.append("lesson-map 没有可解析的页面或知识单元；当前只能生成输入骨架，不能声称完成课程讲解。")
-    elif inferred_units:
-        warnings.append("尚未重建课程的知识依赖，当前按相邻页面临时分组；分组与学习顺序仍需复核。")
+    elif plan and plan.method != "model":
+        warnings.append("已按材料标题合并同主题页；尚未重建完整知识依赖，学习顺序仍需复核。")
+    if plan and plan.method == "model":
+        warnings.append("学习主线与先修关系是模型提出的导师建议，来源与依赖结构已检查，教学合理性仍待复核。")
+    if units and not chain:
+        warnings.append("尚未梳理出精简学习主线，以下暂按材料主题展示。")
     if units and provider is None:
         warnings.append("未提供文本模型；已生成可追溯教学草稿，例题和补链仍需模型或人工复核。")
     if visual_review_pages:
@@ -1514,9 +1515,10 @@ def generate_study_guide(
         pending_segments=pending_segments,
         navigation_segments=navigation_segments,
         speech_role_counts=dict(speech_role_counts),
-        unresolved_items=[item.visual_id for item in pages if item.status in {"pending", "unresolved"}] + [item.segment_id for item in segments if item.status in {"pending", "unresolved"}],
+        unresolved_items=list(dict.fromkeys([item.visual_id for item in pages if item.status in {"pending", "unresolved"}] + [item.segment_id for item in segments if item.status in {"pending", "unresolved"}] + [ref for ref, item in deferred.items() if item["status"] == "pending"])),
         missing_fields=missing,
         warnings=warnings,
+        planning=plan.summary() if plan else {"method": "provided-units", "status": "dependency-error" if dependency_warning else "provided", "unit_count": len(units)},
     )
     notes = [
         "学生主阅读层不显示内部 U/E 等级；来源详情保留在每个知识单元下方。",
@@ -1537,6 +1539,7 @@ def generate_study_guide(
         source_index=source_index,
         report=report,
         notes=notes,
+        course_plan=plan.to_dict() if plan else None,
     )
 
 
@@ -1547,6 +1550,15 @@ def validate_study_guide(value: StudyGuide | Mapping[str, Any] | str | Path, *, 
         report.diagnostics.append(GuideDiagnostic("error", "guide.title", "$.title", "学生讲义必须有标题"))
     if not guide.units:
         report.diagnostics.append(GuideDiagnostic("error" if strict else "warning", "units.empty", "$.units", "没有知识单元，无法完成自学讲解"))
+    if strict:
+        for unit_id in repeated_explanations(guide.units):
+            report.diagnostics.append(GuideDiagnostic("error", "teaching.repeated_explanation", f"$.units[{unit_id}]", "不同知识点重复使用同一套解释与补链，无法据此完成分别学习。"))
+    try:
+        ordered = order_units([KnowledgeUnit(unit_id=unit.unit_id, prerequisite_ids=unit.prerequisite_ids) for unit in guide.units])
+        if [unit.unit_id for unit in ordered] != [unit.unit_id for unit in guide.units]:
+            report.diagnostics.append(GuideDiagnostic("error", "dependency.order", "$.units", "需要先学习前置知识，再进入依赖它的单元。"))
+    except ValueError as exc:
+        report.diagnostics.append(GuideDiagnostic("error", "dependency.invalid", "$.units", str(exc)))
     for index, unit in enumerate(guide.units):
         path = f"$.units[{index}]"
         for name in ("question", "one_sentence", "why", "step_chain", "worked_examples", "practice_items", "source_refs"):
@@ -1628,11 +1640,18 @@ def render_markdown(guide: StudyGuide) -> str:
         lines.extend([f"**先修知识：** {'；'.join(guide.route.prerequisites)}", ""])
     if guide.route.chain:
         lines.extend(["**学习顺序：** " + " → ".join(guide.route.chain), ""])
+    else:
+        lines.extend(["**学习主线待梳理。** 以下暂按材料主题展示。", ""])
     lines.extend(["**每个知识点的做法：** 先想一遍，再看解释；最后完成回忆、过程和迁移练习。", ""])
     for index, unit in enumerate(guide.units, 1):
+        lines.extend([f'<a id="{html.escape(unit.unit_id, quote=True)}"></a>', ""])
         lines.extend([f"## {index}. {unit.title}", "", f"> **先记住一句话：** {unit.one_sentence}", "", f"### 1. 先想 30 秒：{unit.question}", "", "先不要看答案，尝试写出你认为的对象、过程或结果。", "", "### 2. 为什么要学", "", unit.why, ""])
         if unit.prerequisites:
             lines.extend([f"**需要先会：** {'；'.join(unit.prerequisites)}", ""])
+        prerequisite_units = [item for item in guide.units if item.unit_id in unit.prerequisite_ids]
+        if prerequisite_units:
+            links = [f'<a href="#{html.escape(item.unit_id, quote=True)}">{html.escape(item.title)}</a>' for item in prerequisite_units]
+            lines.extend(["卡住时回到：" + "；".join(links), ""])
         lines.extend(["### 3. 材料中看什么", "", unit.material_explanation, ""])
         lines.extend(["### 4. 教师补充", "", unit.teacher_increment, ""])
         lines.extend(["### 5. 导师补链：把逻辑补完整", "", unit.tutor_bridge, ""])
@@ -1678,6 +1697,8 @@ def render_markdown(guide: StudyGuide) -> str:
     lines.extend(["", "<details><summary>展开材料与语音来源索引</summary>", ""])
     for ref in guide.source_index:
         lines.extend([_md_source(ref), ""])
+        if ref.note:
+            lines.extend(["<p>" + html.escape(ref.note) + "</p>", ""])
         if ref.quote:
             lines.extend(["<pre>" + html.escape(ref.quote) + "</pre>", ""])
     lines.extend(["</details>", ""])
@@ -1701,7 +1722,7 @@ def render_html(guide: StudyGuide) -> str:
             "<h2>先看学习路线</h2>",
             f"<p class=\"central\">{esc(guide.route.central_question)}</p>",
             "<h3>学完后你应当能够</h3><ul>" + "".join(f"<li>{esc(item)}</li>" for item in guide.route.outcomes) + "</ul>",
-            f"<p><strong>学习顺序：</strong>{esc(' → '.join(guide.route.chain))}</p>",
+            f"<p><strong>学习顺序：</strong>{esc(' → '.join(guide.route.chain)) if guide.route.chain else '学习主线待梳理；以下暂按材料主题展示。'}</p>",
         ]
     )
     for index, unit in enumerate(guide.units, 1):
@@ -1716,6 +1737,9 @@ def render_html(guide: StudyGuide) -> str:
                 f"<section class=\"bridge\"><h3>导师补链</h3><p>{esc(unit.tutor_bridge)}</p><ol>" + "".join(f"<li>{esc(step)}</li>" for step in unit.step_chain) + "</ol></section>",
             ]
         )
+        prerequisite_units = [item for item in guide.units if item.unit_id in unit.prerequisite_ids]
+        if prerequisite_units:
+            body.append('<p>卡住时回到：' + "；".join(f'<a href="#{esc(item.unit_id)}">{esc(item.title)}</a>' for item in prerequisite_units) + '</p>')
         for example in unit.worked_examples:
             body.extend(
                 [
@@ -1758,7 +1782,7 @@ def render_html(guide: StudyGuide) -> str:
     body.append("<details><summary>展开材料与语音来源索引</summary>")
     for ref in guide.source_index:
         location = f"第 {ref.page} 页" if ref.page is not None else _format_timestamp(ref.start) + " 起" if ref.start is not None else "未精确定位"
-        body.append(f"<details><summary>{esc(ref.label)} · {esc(location)}</summary><p>{esc(ref.quote)}</p></details>")
+        body.append(f"<details><summary>{esc(ref.label)} · {esc(location)}</summary>" + (f"<p>{esc(ref.note)}</p>" if ref.note else "") + f"<p>{esc(ref.quote)}</p></details>")
     body.append("</details>")
     css = """body{max-width:850px;margin:40px auto;padding:0 22px;font:16px/1.8 system-ui,-apple-system,'PingFang SC',sans-serif;color:#26352c;background:#fbfcf8}h1{line-height:1.25}h2{margin-top:2.3em;border-bottom:1px solid #dbe5dc;padding-bottom:.35em}h3{margin-top:1.4em;color:#315c43}.lead,.muted{color:#718078}.central{color:#2f6848;font-size:1.1em;font-weight:700}.draft{padding:10px 14px;border-left:4px solid #b28a37;background:#fff7df}.grip{padding:10px 14px;border-left:4px solid #c9684e;background:#fff5ef}.unit{margin-top:36px}.teacher{padding:10px 14px;border:1px solid #c9dfcf;background:#f3f9f4}.bridge{padding:10px 14px;border:1px solid #f0d4c8;background:#fffaf7}.example{padding:14px;border:1px solid #e3d4b5;background:#fffcf4}.mistakes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#dce6dd}.mistakes div{padding:9px;background:white}.mistakes b{color:#718078;font-size:.78em}.practice,.review{margin:10px 0;padding:12px 14px;border:1px solid #dce6dd;border-radius:7px;background:#fff}details{margin-top:8px;padding-top:8px;border-top:1px dashed #dce6dd}summary{color:#2f6848;cursor:pointer;font-weight:700}code{background:#eef3ee;padding:2px 4px}@media(max-width:600px){body{margin:22px auto;padding:0 15px}.mistakes{grid-template-columns:1fr}}"""
     return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + html.escape(guide.title) + f"</title><style>{css}</style></head><body>" + "\n".join(body) + "</body></html>"
@@ -1780,6 +1804,7 @@ def generate_project_guide(project_dir: str | Path, provider: Any | None = None)
     guide = generate_study_guide(read_json(map_path), provider)
     guide.write_json(paths["study_guide"])
     write_json(paths["generation_report"], guide.report.to_dict())
+    write_json(paths["derived"] / "course-plan.json", guide.course_plan)
     return guide
 
 

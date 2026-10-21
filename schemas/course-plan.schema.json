@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Course planning audit artifact",
+  "description": "A local source-checked planning proposal. Null means the guide uses the supplied knowledge map. Structural acceptance is not expert verification.",
+  "type": ["object", "null"],
+  "required": ["plan_version", "title", "central_question", "outcomes", "prerequisites", "spine", "units", "source_dispositions", "source_fingerprint", "method", "status"],
+  "properties": {
+    "plan_version": {"const": "1.0"},
+    "title": {"type": "string"},
+    "central_question": {"type": "string"},
+    "outcomes": {"type": "array", "items": {"type": "string"}},
+    "prerequisites": {"type": "array", "items": {"type": "string"}},
+    "spine": {"type": "array", "items": {"type": "string"}},
+    "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}},
+    "source_dispositions": {"type": "array", "items": {"type": "object", "required": ["ref", "status", "reason"], "properties": {
+      "ref": {"type": "string"}, "status": {"enum": ["navigation", "context", "pending"]}, "reason": {"type": "string"}, "quote": {"type": "string"}
+    }}},
+    "source_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "method": {"enum": ["source-headings", "model"]},
+    "status": {"enum": ["draft", "proposed"]},
+    "diagnostics": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "unit": {"type": "object", "required": ["unit_id", "title", "visual_ids", "segment_ids", "prerequisite_ids", "exam_evidence_level"], "properties": {
+      "unit_id": {"type": "string"}, "title": {"type": "string"},
+      "visual_ids": {"type": "array", "items": {"type": "string"}},
+      "segment_ids": {"type": "array", "items": {"type": "string"}},
+      "prerequisite_ids": {"type": "array", "items": {"type": "string"}},
+      "exam_evidence_level": {"const": "E0"},
+      "metadata": {"type": "object"}
+    }}
+  }
+}

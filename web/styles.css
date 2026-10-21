@@ -63,3 +63,8 @@ pre { max-width:100%; overflow-x:auto; white-space:pre; }
 }
 @media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; transition:none !important; } }
 @media (max-width:380px) { .top-actions .status { display:none; } .topbar { gap:8px; } }
+.learning-spine { display:flex; flex-wrap:wrap; gap:8px 26px; padding-left:22px; margin:18px 0; color:var(--green); font-size:14px; }
+.learning-spine li { padding-right:12px; }
+.prerequisite-links { margin:10px 0 20px; padding:10px 14px; background:var(--green-soft); border-radius:7px; font-size:13px; }
+.prerequisite-links p { margin:0; }
+.prerequisite-links small { display:block; color:var(--muted); }

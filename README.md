@@ -29,6 +29,12 @@
 文件损坏或生成失败不会替换已有讲义。阅读位置、完成标记和练习草稿分别保存；
 单元内容修订后，对应的旧完成标记和旧答案不会继续算作有效进度。
 
+没有知识地图时，明确选择文本模型会先提出整课规划，再按先修关系逐单元讲解；
+跨页合并必须保留每个来源的原文锚点，遗漏来源或循环依赖会退回草稿。
+学生可从知识点直接返回先修讲解。离线模式只合并明确的同标题页，未形成主线时如实提示。
+重复解题步骤、同题换标签和解析照抄答案等内容也不能通过严格检查；
+这些规则仍不能代替教学正确性评测与学生独立学习验收。
+
 这些改动不代表所有课程已经可以完全独立学习。当前内容深度、知识分组和人工验收的边界见
 [质量状态](docs/quality-status.md)。
 
@@ -109,12 +115,14 @@ src/mst/validation.py   # 来源、等级、对齐和隐私检查
 src/mst/ingest.py       # 输入清点与哈希 manifest
 src/mst/extract.py      # PPTX/Markdown/VTT/SRT/DOCX 的保守文本提取
 src/mst/reconstruct.py  # 离线 provenance scaffold
+src/mst/planning.py     # 整课规划、原文锚点、来源覆盖和先修图检查
 src/mst/guide.py        # 面向学生的自学讲义生成、验证和导出
+src/mst/teaching.py     # 空洞例题、重复练习和解释的可观察问题检查
 src/mst/agent.py        # Provider-neutral 查询/解释接口
 src/mst/providers.py    # Mock 与可选 OpenAI provider
 src/mst/cli.py          # study 命令行入口
 web/                    # 本地学生学习路线与闭卷复习
-schemas/                # lesson-map 和 study-guide JSON Schema
+schemas/                # lesson-map、course-plan 和 study-guide JSON Schema
 examples/               # 可公开的最小 fixture
 ```
 

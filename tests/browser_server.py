@@ -20,6 +20,7 @@ with tempfile.TemporaryDirectory(prefix="mst-browser-") as directory:
     second = copy.deepcopy(guide.units[0])
     second.unit_id = "test::second"
     second.title = "第二个知识点"
+    second.prerequisite_ids = [guide.units[0].unit_id]
     for index, practice in enumerate(second.practice_items):
         practice.unit_id = second.unit_id
         practice.practice_id = f"second::{index}"

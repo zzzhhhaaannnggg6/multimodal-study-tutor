@@ -14,6 +14,8 @@ test("refresh resumes reading, preserves draft and keeps answers folded", async 
   const errors = []; page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await expect(page.locator("#learningSpine li")).toHaveCount(1);
+  await expect(page.locator("#learningSpineNotice")).toBeHidden();
   await page.screenshot({path:testInfo.outputPath("route.png")});
   await page.locator("#startLearning").click();
   const answer = page.locator("#lessonContent textarea").first();
@@ -30,6 +32,7 @@ test("refresh resumes reading, preserves draft and keeps answers folded", async 
   await expect(page.locator("#lessonContent .practice details[open]")).toHaveCount(0);
   await page.locator("#nextUnit").click();
   await expect(page.locator("#lessonContent h2")).toHaveText("第二个知识点");
+  await expect(page.locator(".prerequisite-links")).toContainText("从证据到机制");
   await expect(page.locator("#lessonContent h2")).toBeInViewport();
   await page.screenshot({path:testInfo.outputPath("lesson.png")});
   await expect(page.locator("#progressText")).toContainText("0/2");
@@ -55,6 +58,9 @@ test("unit completion is reversible and review returns to the lesson", async ({p
   await card.locator("summary").click();
   await card.locator("[data-return-unit]").click();
   await expect(page.locator("#learnView")).toBeVisible();
+  await page.locator("#nextUnit").click();
+  await page.locator(".prerequisite-links button").click();
+  await expect(page.locator("#lessonContent h2")).toHaveText("从证据到机制");
 });
 
 test("revised content invalidates only its own progress and different courses stay separate", async ({page, request}) => {
@@ -103,4 +109,19 @@ test("upload completes through real job stages and a bad upload preserves it", a
   await expect(page.locator("#guideTitle")).toHaveText(title);
   await page.locator("#retryJob").click();
   await expect(page.locator("#uploadMessage")).toContainText("无法打开");
+});
+
+test("unfinished mainline and source limitations are readable without executing source text", async ({page, request}) => {
+  const guide = await (await request.get("/study-guide.json")).json();
+  guide.route.chain = [];
+  guide.source_index[0].note = '缺少图中坐标，待复核。<script>window.sourceNoteExecuted = true</script>';
+  await page.goto("/");
+  await expect(page.locator("#startLearning")).toBeEnabled();
+  await page.locator("#guideFile").setInputFiles({name:"教学草稿.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify(guide))});
+  await expect(page.locator("#learningSpineNotice")).toBeVisible();
+  await expect(page.locator("#learningSpineNotice")).toContainText("主线待梳理");
+  await page.locator("#sourcesSection > details > summary").click();
+  await expect(page.locator("#sourceList")).toContainText(guide.source_index[0].note);
+  await expect(page.locator("#sourceList script")).toHaveCount(0);
+  expect(await page.evaluate(() => window.sourceNoteExecuted)).toBeUndefined();
 });

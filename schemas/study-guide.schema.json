@@ -16,6 +16,7 @@
     "units": {"type": "array", "items": {"$ref": "#/$defs/unit"}},
     "review_items": {"type": "array", "items": {"$ref": "#/$defs/practice"}},
     "source_index": {"type": "array", "items": {"$ref": "#/$defs/source"}},
+    "course_plan": {"type": ["object", "null"]},
     "generation_report": {"$ref": "#/$defs/report"},
     "notes": {"type": "array", "items": {"type": "string"}}
   },
@@ -42,6 +43,7 @@
         "start": {},
         "end": {},
         "quote": {"type": ["string", "null"]},
+        "note": {"type": ["string", "null"]},
         "image_path": {"type": ["string", "null"]},
         "verified": {"type": "boolean"},
         "status": {"type": "string"}
@@ -94,6 +96,7 @@
         "one_sentence": {"type": "string"},
         "why": {"type": "string"},
         "prerequisites": {"type": "array", "items": {"type": "string"}},
+        "prerequisite_ids": {"type": "array", "items": {"type": "string"}},
         "visual_refs": {"type": "array", "items": {"type": "string"}},
         "material_explanation": {"type": "string"},
         "teacher_increment": {"type": "string"},
@@ -125,6 +128,7 @@
         "pending_segments": {"type": "integer", "minimum": 0},
         "navigation_segments": {"type": "integer", "minimum": 0},
         "speech_role_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+        "planning": {"type": "object"},
         "unresolved_items": {"type": "array", "items": {"type": "string"}},
         "missing_fields": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}}
