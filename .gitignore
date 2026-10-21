@@ -45,6 +45,10 @@ MANIFEST
 /derived/
 /exports/
 /sources/
+.study-jobs/
+.study-progress/
+.study-state.json
+.study-tutor/
 /recordings/
 /transcripts/
 /screenshots/
@@ -86,6 +90,8 @@ MANIFEST
 
 # JavaScript/Web tooling
 node_modules/
+/test-results/
+/playwright-report/
 web/dist/
 web/.vite/
 web/.next/

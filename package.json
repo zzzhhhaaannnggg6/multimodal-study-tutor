@@ -1,0 +1,11 @@
+{
+  "name": "multimodal-study-tutor-web-checks",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/progress.test.cjs",
+    "test:web": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

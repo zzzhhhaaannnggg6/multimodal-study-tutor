@@ -1,27 +1,20 @@
 #!/bin/zsh
 
 # Double-click this file on macOS to open the local student study route.
-# A project folder can also be passed as the first argument.
+# An existing course workspace can be passed as the first argument.
 set -e
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-SOURCE_DIR="${1:-}"
-
-if [[ -z "$SOURCE_DIR" && "$(uname -s)" == "Darwin" ]]; then
-  SOURCE_DIR="$(osascript -e 'POSIX path of (choose folder with prompt "选择课程材料所在文件夹")' 2>/dev/null || true)"
+STUDY_ROOT="$(cd "$(dirname "$0")" && pwd)"
+STUDY_PROJECT="${1:-$STUDY_ROOT/local-data/my-study}"
+STUDY_PYTHON="$STUDY_ROOT/.venv/bin/python"
+if [[ ! -x "$STUDY_PYTHON" ]]; then
+  STUDY_PYTHON="$(command -v python3 || true)"
 fi
-
-if [[ -z "$SOURCE_DIR" ]]; then
-  SOURCE_DIR="$ROOT/examples/minimal_course"
+if [[ -z "$STUDY_PYTHON" ]] || ! "$STUDY_PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+  echo "需要 Python 3.10 或更新版本。请先从 https://www.python.org/downloads/ 安装 Python，再双击打开。"
+  read -k 1 "?按任意键关闭"
+  exit 1
 fi
-
-cd "$ROOT"
-if [[ -f "$SOURCE_DIR/project.json" ]]; then
-  PROJECT="$SOURCE_DIR"
-  PYTHONPATH="$ROOT/src" python3 -m mst.cli generate "$PROJECT"
-else
-  PROJECT="$SOURCE_DIR/.study-tutor"
-  PYTHONPATH="$ROOT/src" python3 -m mst.cli quickstart "$PROJECT" "$SOURCE_DIR" --subject computer-systems
-fi
-echo "正在打开自学讲义：$PROJECT"
-PYTHONPATH="$ROOT/src" python3 -m mst.cli serve "$PROJECT" --open
+cd "$STUDY_ROOT"
+echo "正在打开自学讲义。请在网页中选择课程材料；已有讲义不会重新生成。"
+PYTHONPATH="$STUDY_ROOT/src" "$STUDY_PYTHON" -m mst.cli serve "$STUDY_PROJECT" --port 0 --open

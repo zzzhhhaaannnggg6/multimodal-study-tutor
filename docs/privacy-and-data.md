@@ -69,6 +69,18 @@ notify affected people when appropriate.
 
 ## Retention and deletion
 
+Browser uploads create local copies under `.study-jobs/`; completed and failed
+jobs remain there so users can retry or inspect earlier results. No automatic
+retention expiry or cleanup UI is provided yet. Learning answers and reading
+positions are stored in browser local storage and, when the local service is
+available, under `.study-progress/`. Deleting browser storage alone does not
+delete the workspace copies. The default double-click launcher uses
+`local-data/my-study/`. These paths are ignored by Git.
+
+The web generation path never calls a hosted model. Audio-only imports are
+retained but cannot produce a replacement lecture without readable text or a
+transcript. Explicit CLI provider selection remains a separate opt-in action.
+
 Users should be able to delete a local project by removing its source and
 generated workspace directories. Provider-side retention follows that
 provider's policy and cannot be controlled by deleting local files. The

@@ -17,8 +17,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .multimodal import classify_speech_text, extract_speech_increment, speech_role_label, visual_signals
-from .io import project_paths, read_json, write_json
+from .io import active_project_dir, project_paths, read_json, write_json
 from .models import Claim, Evidence, KnowledgeUnit, LessonMap, SpeechSegment, VisualFrame, coerce_lesson_map
+from .profiles import PROFILES
 
 
 def _list(value: Any) -> list[Any]:
@@ -1334,6 +1335,8 @@ def generate_study_guide(
     units: list[LearningUnit] = []
     missing: list[str] = []
     warnings: list[str] = []
+    for issue in lesson.notes.get("extraction_issues", []):
+        warnings.append(f"材料未能读取：{issue.get('name', '课程材料')}；{issue.get('error', '请检查格式或补充转写')}。未读取的部分没有进入讲解。")
     unit_titles = {item.unit_id: _text(item.title, item.unit_id) for item in source_units}
 
     for source_unit in source_units:
@@ -1524,7 +1527,7 @@ def generate_study_guide(
         guide_version="1.0",
         guide_kind="student-study-guide",
         lesson_id=lesson.lesson_id,
-        title=_text(lesson.title, f"{lesson.subject} 自学讲义"),
+        title=_text(lesson.title, f"{PROFILES[lesson.profile].label if lesson.profile in PROFILES else lesson.subject} 自学讲义"),
         subject=lesson.subject,
         profile=lesson.profile,
         language="zh-CN",
@@ -1762,7 +1765,7 @@ def render_html(guide: StudyGuide) -> str:
 
 
 def load_project_guide(project_dir: str | Path) -> StudyGuide:
-    paths = project_paths(project_dir)
+    paths = project_paths(active_project_dir(project_dir))
     guide_path = paths["study_guide"]
     if not guide_path.exists():
         raise FileNotFoundError(f"study guide does not exist: {guide_path}; run study generate first")

@@ -11,7 +11,7 @@ from .agent import StudyAgent
 from .export import export_markdown, export_study_guide
 from .guide import generate_project_guide, validate_study_guide
 from .ingest import ingest_project, init_project, transcribe_project_audio
-from .io import project_paths, read_json
+from .io import active_project_dir, project_paths, read_json
 from .models import LessonMap
 from .profiles import list_profiles
 from .reconstruct import build_scaffold, inspect_project_visuals
@@ -90,6 +90,8 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command in {"ingest", "build", "generate", "export", "validate"} and getattr(args, "project", None):
+        args.project = active_project_dir(args.project)
     if args.command == "init":
         manifest = init_project(args.project, args.subject)
         print(f"Initialized {args.project} ({manifest['profile']})")
@@ -206,8 +208,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "serve":
         from .server import serve
 
-        serve(args.project, args.host, args.port, args.open_browser)
-        return 0
+        try:
+            serve(args.project, args.host, args.port, args.open_browser)
+            return 0
+        except (ValueError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
     if args.command == "ask":
         data = read_json(args.map)
         lesson_map = LessonMap.from_dict(data)

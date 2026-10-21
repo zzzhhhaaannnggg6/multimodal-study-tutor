@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .io import project_paths, read_json
+from .io import active_project_dir, project_paths, read_json
 from .guide import load_project_guide, render_html, render_markdown
 
 
@@ -14,6 +14,7 @@ def _level(value: Any) -> str:
 
 
 def export_markdown(project_dir: str | Path, output: str | Path | None = None) -> Path:
+    project_dir = active_project_dir(project_dir)
     paths = project_paths(project_dir)
     if paths["study_guide"].exists():
         target = Path(output) if output else paths["exports"] / "study-guide.md"
@@ -82,6 +83,7 @@ def export_study_guide(
 ) -> Path:
     """Export the learner-facing guide as Markdown, HTML, or JSON."""
 
+    project_dir = active_project_dir(project_dir)
     guide = load_project_guide(project_dir)
     paths = project_paths(project_dir)
     suffix = {"md": ".md", "html": ".html", "json": ".json"}.get(format)

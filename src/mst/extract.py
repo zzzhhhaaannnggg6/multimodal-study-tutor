@@ -576,7 +576,7 @@ def extract_source(path: str | Path, kind: str | None = None) -> tuple[list[Visu
     return [], []
 
 
-def extract_manifest_sources(rows: Iterable[dict[str, object]]) -> tuple[list[VisualFrame], list[SpeechSegment]]:
+def extract_manifest_sources(rows: Iterable[dict[str, object]], *, issues: list[dict[str, str]] | None = None) -> tuple[list[VisualFrame], list[SpeechSegment]]:
     pages: list[VisualFrame] = []
     segments: list[SpeechSegment] = []
     for row in rows:
@@ -585,9 +585,9 @@ def extract_manifest_sources(rows: Iterable[dict[str, object]]) -> tuple[list[Vi
             continue
         try:
             visual, speech = extract_source(path, str(row.get("kind", "")))
-        except (OSError, ValueError, KeyError, zipfile.BadZipFile, ElementTree.ParseError):
-            # Keep ingestion resilient; the source remains in the manifest and
-            # a later validation/review step can surface the parser issue.
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
+            if issues is not None:
+                issues.append({"source_id": str(row.get("source_id", "")), "name": str(row.get("name", "课程材料")), "error": "文件无法打开或内容无法解析" if isinstance(exc, zipfile.BadZipFile) else str(exc)})
             continue
         source_id = str(row.get("source_id", ""))
         for item in visual:

@@ -32,4 +32,9 @@ Before publishing a project or example:
 - [ ] Confirm raw PPT, DOCX, audio, screenshots and generated private outputs
       are ignored by Git.
 - [ ] Check that README commands work in a fresh virtual environment.
+- [ ] Build and install a wheel outside the checkout; fetch HTML, JavaScript and CSS.
+- [ ] Run `npm test` and `npm run test:web` for desktop and mobile workflows.
+- [ ] Verify corrupt input, concurrent submission and service shutdown preserve the old course.
+- [ ] Verify reading and answer drafts restore without browser storage, and changed units invalidate stale progress.
+- [ ] Verify the macOS launcher opens existing work without generating it again.
 - [ ] Tag the release only after the example can run without network access.

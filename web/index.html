@@ -7,6 +7,7 @@
     <meta name="description" content="给没有听课的大学生使用的可独立学习讲义。" />
     <title>自学讲义 · Multimodal Study Tutor</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="progress.js" defer></script>
     <script src="app.js" defer></script>
   </head>
   <body>
@@ -40,9 +41,13 @@
       </section>
 
       <section class="upload-box card" id="uploadBox">
-        <div><p class="eyebrow">第一次使用？</p><h2>导入材料，生成学习路线</h2><p>选课件和教师转写即可。原文件只保存在当前电脑，生成后直接进入路线。</p></div>
-        <div class="upload-controls"><input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /><button class="primary-button" id="generateButton" type="button">生成自学讲义</button><span class="upload-message" id="uploadMessage">也可以先打开已有讲义。</span></div>
+        <details id="materialPanel" open><summary>导入或更换课程材料</summary>
+        <div><h2>导入这节课的材料</h2><p>选择或拖入课件和教师转写。材料只在本机处理；单独的录音会保留，暂不自动转写。</p></div>
+        <div class="upload-controls"><label>学科 <select id="subject"><option value="generic">通用课程</option><option value="computer-systems">计算机系统</option><option value="mathematics">数学</option><option value="physics">物理</option><option value="history">历史与社会科学</option><option value="biology">生物</option><option value="chemistry">化学</option><option value="law">法学</option><option value="literature">文学</option></select></label><input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /><span id="selectedFiles" class="upload-message"></span><button class="primary-button" id="generateButton" type="button">生成我的自学讲义</button><button class="secondary-button" id="retryJob" type="button" hidden>用已保存的材料重试</button><span class="upload-message" id="uploadMessage" role="status" aria-live="polite">也可以打开已有讲义。</span><ol id="jobStages" class="job-stages" aria-label="生成进度" hidden></ol></div>
+        </details>
       </section>
+
+      <p id="saveStatus" class="muted" role="status" aria-live="polite"></p>
 
       <section id="routeView" class="view" aria-labelledby="routeHeading">
         <div class="route-grid">
@@ -79,7 +84,8 @@
       </section>
 
       <section class="sources card" id="sourcesSection">
-        <details><summary>查看材料页码、课堂时间段与生成状态</summary><div class="source-summary" id="sourceSummary"></div><div class="source-list" id="sourceList"></div></details>
+        <nav id="downloads" class="downloads" aria-label="下载讲义" hidden><a data-export="html" href="api/exports/html" download>下载离线讲义</a><a data-export="md" href="api/exports/md" download>下载可编辑文本</a></nav>
+        <details><summary>查看材料页码、课堂时间段与生成状态</summary><div class="source-summary" id="sourceSummary"></div><div class="source-list" id="sourceList"></div><a id="jsonDownload" data-export="json" href="api/exports/json" download hidden>导出讲义数据文件</a></details>
       </section>
     </main>
 

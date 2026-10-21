@@ -36,3 +36,30 @@ button { cursor:pointer; }
 .finish-box { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-top:24px; padding-top:16px; border-top:1px solid var(--line); }
 .review-progress { grid-column:1 / -1; margin:0; color:var(--muted); font-size:12px; }
 .unit-nav .nav-item.is-done span { color:var(--green); }
+
+/* Keep reading and answering comfortable on narrow screens. */
+[hidden] { display:none !important; }
+select { max-width:100%; padding:7px; font:inherit; border:1px solid var(--line); border-radius:6px; background:white; }
+.upload-controls { min-width:0; }
+.upload-box > details { width:100%; }
+.upload-box > details > summary { color:var(--green); cursor:pointer; font-weight:700; }
+.upload-controls input[type="file"] { max-width:100%; }
+.upload-message, .lesson, .review-card, .source-list, .unit-card strong { overflow-wrap:anywhere; }
+.answer-label { display:block; margin:12px 0; color:var(--muted); font-size:13px; }
+.answer-label textarea { display:block; width:100%; min-height:100px; margin-top:5px; padding:10px; resize:vertical; font:inherit; font-size:16px; line-height:1.6; color:var(--ink); border:1px solid #b8cabe; border-radius:7px; background:white; }
+button, summary, .downloads a { min-height:44px; }
+summary { padding:10px 0; }
+button:focus-visible, a:focus-visible, summary:focus-visible, textarea:focus-visible { outline:3px solid var(--coral); outline-offset:3px; }
+.job-stages { display:flex; flex-wrap:wrap; gap:6px 20px; width:100%; margin:8px 0 0; padding-left:20px; color:var(--muted); font-size:12px; }
+.job-stages .reached { color:var(--green); font-weight:700; }
+.is-dragging { outline:3px dashed var(--green); outline-offset:3px; }
+.downloads { display:flex; flex-wrap:wrap; gap:15px; margin:12px 0; font-size:13px; }
+.downloads a { display:inline-flex; align-items:center; color:var(--green); }
+pre { max-width:100%; overflow-x:auto; white-space:pre; }
+@media (max-width:800px) {
+  .unit-nav { display:block; }
+  #unitNav { display:flex; gap:7px; overflow-x:auto; }
+  .nav-item { width:160px; flex-shrink:0; }
+}
+@media (prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; transition:none !important; } }
+@media (max-width:380px) { .top-actions .status { display:none; } .topbar { gap:8px; } }

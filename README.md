@@ -24,6 +24,11 @@
 已识别的指令会说明实际读取和写入的操作数；`muli` 等课件教学记法会注明与标准指令集的区别。
 模型缺少例题步骤或练习时，程序保留缺口，不再用通用句凑齐“完整讲义”。
 
+本地网页现在支持独立生成任务、阶段提示和失败重试。刷新页面会重新读取任务；
+关闭本地服务后，未完成的任务可以用已保存的材料重新生成。每次导入单独保存，
+文件损坏或生成失败不会替换已有讲义。阅读位置、完成标记和练习草稿分别保存；
+单元内容修订后，对应的旧完成标记和旧答案不会继续算作有效进度。
+
 这些改动不代表所有课程已经可以完全独立学习。当前内容深度、知识分组和人工验收的边界见
 [质量状态](docs/quality-status.md)。
 
@@ -43,7 +48,6 @@ study init /tmp/my-lesson --subject generic
 study ingest /tmp/my-lesson examples/minimal_course
 study build /tmp/my-lesson
 study generate /tmp/my-lesson
-study generate /tmp/my-lesson --vision-provider openai
 study validate --project /tmp/my-lesson --strict
 study export /tmp/my-lesson --format md
 study serve /tmp/my-lesson
@@ -55,7 +59,13 @@ study serve /tmp/my-lesson
 python -m http.server 8765 --directory web
 ```
 
-macOS 用户也可以双击仓库根目录的 `start-study.command`，选择项目文件夹后直接打开本地学习页面。
+macOS 用户装有 Python 3.10+ 后，可双击仓库根目录的 `start-study.command`。
+网页会直接打开，在页面选择或拖入材料并选择学科；默认工作区在
+`local-data/my-study/`，下次打开会恢复已有讲义，不重复生成。
+此入口仍需要 Python，目前还不是免安装的桌面应用。
+
+网页默认只使用本地处理，不调用文本、语音或视觉云端模型；原始音频会保存但不自动转写。
+单次最多 60 个文件、合计 100 MB。旧版 `.ppt` 需要先另存为 `.pptx`。
 
 `quickstart` 和 `build` 默认会尝试把 PPT/PDF 渲染到项目的
 `derived/rendered/`，供来源附录和视觉复核使用；使用 `--no-render` 可关闭。
@@ -123,6 +133,10 @@ examples/               # 可公开的最小 fixture
 ```bash
 python -m pip install -e '.[dev]'
 python -m pytest
+npm ci
+npm test
+npx playwright install chromium
+npm run test:web
 ```
 
 如果环境没有 pytest，至少可以运行：
@@ -133,6 +147,7 @@ python -m mst.cli validate examples/minimal_course/lesson-map.json --strict
 ```
 
 Profile 编写规则见 [docs/profile-authoring.md](docs/profile-authoring.md)，隐私和数据边界见 [docs/privacy-and-data.md](docs/privacy-and-data.md)。
+网页任务、进度保存和安装包检查见 [本地网页工作流](docs/local-web.md)。
 
 ## 许可证
 

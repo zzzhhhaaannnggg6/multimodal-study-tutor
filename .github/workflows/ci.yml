@@ -84,3 +84,37 @@ jobs:
             echo "Found a machine-specific absolute path in tracked content." >&2
             exit 1
           fi
+
+      - name: Verify an installed wheel outside the checkout
+        shell: bash
+        run: |
+          python -m pip install build
+          python -m build --wheel
+          python -m venv /tmp/mst-wheel-check
+          /tmp/mst-wheel-check/bin/python -m pip install --no-deps dist/*.whl
+          cd /tmp
+          /tmp/mst-wheel-check/bin/python "$GITHUB_WORKSPACE/tests/check_installed_web.py"
+
+  web:
+    name: Student browser workflow
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: python -m pip install -e .
+      - run: npm ci
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: test-results/
+          retention-days: 7

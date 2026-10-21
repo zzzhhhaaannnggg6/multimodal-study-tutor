@@ -7,7 +7,7 @@ provider later. It never claims that a file was visually inspected or heard.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .alignment import align_speech_to_visuals
 from .render import render_visual_source
@@ -63,7 +63,7 @@ def inspect_project_visuals(project_dir: str | Path, provider: Any) -> int:
     return inspected
 
 
-def build_scaffold(project_dir: str | Path, *, render: bool = False) -> dict[str, Any]:
+def build_scaffold(project_dir: str | Path, *, render: bool = False, on_progress: Callable[[str, str], None] | None = None) -> dict[str, Any]:
     paths = project_paths(project_dir)
     if not paths["manifest"].exists():
         raise FileNotFoundError(f"project manifest does not exist: {paths['manifest']}")
@@ -71,15 +71,20 @@ def build_scaffold(project_dir: str | Path, *, render: bool = False) -> dict[str
     sources = manifest.get("source_manifest", [])
     visuals = [item for item in sources if item.get("kind") in {"slides", "reading"}]
     speech = [item for item in sources if item.get("kind") in {"transcript", "audio"}]
-    extracted_pages, extracted_segments = extract_manifest_sources(sources)
+    progress = on_progress or (lambda stage, message: None)
+    progress("extracting", "正在读取课件与教师转写")
+    extraction_issues: list[dict[str, str]] = []
+    extracted_pages, extracted_segments = extract_manifest_sources(sources, issues=extraction_issues)
     # Build conservative lexical candidates here so the map contains useful
     # page/time relationships before an optional model or human review.  The
     # alignment object records confidence and keeps weak candidates visible.
+    progress("aligning", "正在核对页面与教师讲解的关系")
     extracted_segments = align_speech_to_visuals(extracted_pages, extracted_segments)
     render_notes: list[str] = []
     rendered_count = 0
     if render:
         for source in visuals:
+            progress("rendering", f"正在准备页面图像：{source.get('name', '课程材料')}")
             source_path = source.get("path")
             source_id = str(source.get("source_id", "source"))
             if not source_path:
@@ -133,6 +138,7 @@ def build_scaffold(project_dir: str | Path, *, render: bool = False) -> dict[str
         "assessment_evidence": [],
         "chapter_index": [],
         "notes": {
+            "extraction_issues": extraction_issues,
             "status": "scaffold",
             "message": "仅完成输入清点；请运行解析/对齐步骤后再生成教学主张。",
             "rendering": {
