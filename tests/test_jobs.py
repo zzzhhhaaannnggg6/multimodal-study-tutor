@@ -190,3 +190,104 @@ def test_status_save_failure_after_publication_does_not_hide_saved_result(tmp_pa
         assert load_project_guide(tmp_path).units
     finally:
         manager.close()
+
+
+def test_material_receipts_and_supplementation_keep_originals_and_course_identity(tmp_path):
+    manager = JobManager(tmp_path)
+    try:
+        rows = [*uploads("# 基数转换\n把二进制 101 转换为十进制。"),
+                {"name": "录音.mp3", "data": "YXVkaW8="}, {"name": "坏文件.pptx", "data": "YnJva2Vu"}]
+        first = finish(manager, manager.submit(rows))
+        assert first["status"] == "succeeded"
+        receipts = {row["name"]: row for row in first["materials"]}
+        assert receipts["课程.md"]["text_page_count"] == 1
+        assert receipts["录音.mp3"]["status"] == "transcription-needed"
+        assert receipts["坏文件.pptx"]["status"] == "unreadable"
+        old_root = active_project_dir(tmp_path)
+        snapshots = {path: path.read_bytes() for path in (old_root / "sources/uploads").iterdir()}
+        keep = [first["files"][0]["stored_name"], first["files"][1]["stored_name"]]
+        transcript = {"name": "教师转写.vtt", "data": base64.b64encode(b"WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n101 in binary equals 5 in decimal.\n").decode()}
+        revised = finish(manager, manager.revise(first["job_id"], keep, [transcript]))
+        assert revised["status"] == "succeeded", revised
+        assert revised["parent_job_id"] == first["job_id"]
+        assert revised["course_id"] == first["course_id"] == load_project_guide(tmp_path).lesson_id
+        assert [row["name"] for row in revised["files"]] == ["课程.md", "录音.mp3", "教师转写.vtt"]
+        receipt = revised["materials"][-1]
+        assert receipt["segment_count"] == receipt["timed_segment_count"] == 1
+        assert receipt["status"] == "text-read"
+        assert all(path.read_bytes() == content for path, content in snapshots.items())
+        assert "坏文件" not in str(revised["materials"])
+        assert str(tmp_path) not in str(revised["materials"])
+        manager.close()
+        manager = JobManager(tmp_path)
+        assert manager.latest()["materials"] == revised["materials"]
+    finally:
+        manager.close()
+
+
+def test_repair_failed_input_and_empty_or_invalid_revisions_are_atomic(tmp_path):
+    manager = JobManager(tmp_path)
+    try:
+        original = finish(manager, manager.submit(uploads()))
+        broken = finish(manager, manager.submit([{"name": "课程.pptx", "data": "YnJva2Vu"}]))
+        assert broken["status"] == "failed"
+        assert broken["materials"][0]["status"] == "unreadable"
+        previous = active_project_dir(tmp_path)
+        count = len(manager.jobs)
+        for keep, files in [([], []), (["../课程.pptx"], []), ([broken["files"][0]["stored_name"]] * 2, []),
+                            ([original["files"][0]["stored_name"]], []), ([], [{"name": "x.md", "data": "invalid!"}]), ([], None)]:
+            with pytest.raises(ValueError):
+                manager.revise(broken["job_id"], keep, files)
+        assert len(manager.jobs) == count
+        assert active_project_dir(tmp_path) == previous
+        repaired = finish(manager, manager.revise(broken["job_id"], [], uploads("# 修复后的文字课件\n可读内容")))
+        assert repaired["status"] == "succeeded"
+        assert repaired["parent_job_id"] == broken["job_id"]
+        assert len(repaired["files"]) == 1
+    finally:
+        manager.close()
+
+
+def test_revision_keeps_previous_publication_on_failure_and_enforces_combined_limits(tmp_path, monkeypatch):
+    manager = JobManager(tmp_path)
+    try:
+        first = finish(manager, manager.submit(uploads()))
+        previous = active_project_dir(tmp_path)
+        stored = first["files"][0]["stored_name"]
+        monkeypatch.setattr("mst.jobs.MAX_UPLOAD_BYTES", 4)
+        with pytest.raises(ValueError, match="100 MB"):
+            manager.revise(first["job_id"], [stored], [])
+        monkeypatch.undo()
+        failed = finish(manager, manager.revise(first["job_id"], [], [{"name": "bad.pptx", "data": "YnJva2Vu"}]))
+        assert failed["status"] == "failed"
+        assert active_project_dir(tmp_path) == previous
+        assert failed["course_id"] == first["course_id"]
+        recovered = finish(manager, manager.revise(failed["job_id"], [], uploads()))
+        assert recovered["course_id"] == first["course_id"]
+    finally:
+        manager.close()
+
+
+def test_legacy_revision_identity_and_unavailable_saved_file_do_not_expose_paths(tmp_path):
+    manager = JobManager(tmp_path)
+    try:
+        first = finish(manager, manager.submit(uploads()))
+        identity = first["course_id"]
+        manager.jobs[first["job_id"]].pop("course_id")  # Records from before the revision API.
+        kept = first["files"][0]["stored_name"]
+        revised = finish(manager, manager.revise(first["job_id"], [kept], []))
+        assert revised["course_id"] == identity
+        source = active_project_dir(tmp_path) / "sources/uploads" / kept
+        source.unlink()
+        count = len(manager.jobs)
+        with pytest.raises(ValueError, match="重新添加") as error:
+            manager.revise(revised["job_id"], [kept], [])
+        assert str(tmp_path) not in str(error.value)
+        outside = tmp_path / "private.md"
+        outside.write_text("not an uploaded source", encoding="utf-8")
+        source.symlink_to(outside)
+        with pytest.raises(ValueError, match="路径无效"):
+            manager.revise(revised["job_id"], [kept], [])
+        assert len(manager.jobs) == count
+    finally:
+        manager.close()

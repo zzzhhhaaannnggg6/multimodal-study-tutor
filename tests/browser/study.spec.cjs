@@ -100,6 +100,7 @@ test("upload completes through real job stages and a bad upload preserves it", a
   await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
   await expect(page.locator("#draftNotice")).toBeVisible();
   const title = await page.locator("#guideTitle").textContent();
+  await page.locator("#inputMode").selectOption("new");
   await page.locator("#sourceFiles").setInputFiles({name:"broken.pptx",mimeType:"application/octet-stream",buffer:Buffer.from("broken-zip")});
   await page.locator("#generateButton").click();
   await expect(page.locator("#retryJob")).toBeVisible();
@@ -109,6 +110,43 @@ test("upload completes through real job stages and a bad upload preserves it", a
   await expect(page.locator("#guideTitle")).toHaveText(title);
   await page.locator("#retryJob").click();
   await expect(page.locator("#uploadMessage")).toContainText("无法打开");
+});
+
+test("student can add a transcript, replace one file and reopen saved material receipts", async ({page}, testInfo) => {
+  const errors = []; page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  const put = async (name, content) => page.locator("#sourceFiles").setInputFiles({name, mimeType:"application/octet-stream", buffer:Buffer.from(content)});
+  await put("进制.md", "# 数的表示\n把二进制 101 转换为十进制。");
+  await put("课堂录音.mp3", "synthetic-audio");
+  await put("多余.txt", "temporary");
+  await expect(page.locator(".pending-files li")).toHaveCount(3);
+  await page.getByRole("button", {name:"移除 多余.txt", exact:true}).click();
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
+  await expect(page.locator("#materialResults li")).toHaveCount(2);
+  await expect(page.locator("#materialResults")).toContainText("录音尚未转写");
+  await expect(page.locator("#inputMode")).toHaveValue("revise");
+  await expect(page.locator("#subject")).toBeDisabled();
+  const original = await (await page.request.get("/study-guide.json")).json();
+  await page.reload();
+  await page.locator("#showMaterials").click();
+  await expect(page.locator("#materialResults li")).toHaveCount(2);
+  await expect(page.locator("#materialResults input:checked")).toHaveCount(2);
+  await page.locator("#materialResults li").filter({hasText:"课堂录音.mp3"}).locator('input[type="checkbox"]').uncheck();
+  const name = "教师转写与课堂补充".repeat(4) + ".vtt";
+  await put(name, "WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n把二进制 101 转换为十进制，按位权相加。\n");
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
+  await expect(page.locator("#materialResults li")).toHaveCount(2);
+  await expect(page.locator("#materialResults")).not.toContainText("课堂录音.mp3");
+  await expect(page.locator("#materialResults")).toContainText("转写已读取");
+  const revised = await (await page.request.get("/study-guide.json")).json();
+  expect(revised.lesson_id).toEqual(original.lesson_id);
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+  await page.screenshot({path:testInfo.outputPath("material-repair.png")});
+  expect(errors).toEqual([]);
 });
 
 test("unfinished mainline and source limitations are readable without executing source text", async ({page, request}) => {

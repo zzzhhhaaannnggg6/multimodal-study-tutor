@@ -33,6 +33,24 @@ def request(service, method, path, value=None, headers=None):
     return status, body
 
 
+def test_http_supplement_uses_explicit_retained_files_and_reports_each_outcome(service):
+    first = service.jobs.submit(uploads())
+    assert service.jobs.events[first["job_id"]].wait(5)
+    code, body = request(service, "POST", f"/api/jobs/{first['job_id']}/revise",
+                         {"keep": [first["files"][0]["stored_name"]], "files": [{"name": "录音.mp3", "data": "YXVkaW8="}]})
+    assert code == 202
+    revised = json.loads(body)["job"]
+    assert service.jobs.events[revised["job_id"]].wait(5)
+    code, body = request(service, "GET", f"/api/jobs/{revised['job_id']}")
+    revised = json.loads(body)["job"]
+    assert code == 200 and revised["status"] == "succeeded"
+    assert revised["materials"][-1]["status"] == "transcription-needed"
+    for payload in ({"keep": ["../../private"]}, {"keep": []}, {"keep": None}):
+        assert request(service, "POST", f"/api/jobs/{first['job_id']}/revise", payload)[0] == 400
+    assert request(service, "POST", f"/api/jobs/{first['job_id']}/revise", {"keep": []},
+                   {"Origin": "https://example.com"})[0] == 403
+
+
 def test_http_upload_disconnect_status_refresh_exports_and_asset_boundary(service):
     assert request(service, "GET", "/study-guide.json")[0] == 404
     code, body = request(service, "POST", "/api/jobs", {"files": uploads(), "subject": "generic"})

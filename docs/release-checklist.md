@@ -38,6 +38,7 @@ Before publishing a project or example:
 - [ ] Build and install a wheel outside the checkout; fetch HTML, JavaScript and CSS.
 - [ ] Run `npm test` and `npm run test:web` for desktop and mobile workflows.
 - [ ] Verify corrupt input, concurrent submission and service shutdown preserve the old course.
+- [ ] Verify per-file receipts distinguish unreadable/partial/audio-only input; supplement saved sources and replace one file without overwriting the prior job.
 - [ ] Verify reading and answer drafts restore without browser storage, and changed units invalidate stale progress.
 - [ ] Verify the macOS launcher opens existing work without generating it again.
 - [ ] Tag the release only after the example can run without network access.

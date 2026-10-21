@@ -70,8 +70,12 @@ notify affected people when appropriate.
 ## Retention and deletion
 
 Browser uploads create local copies under `.study-jobs/`; completed and failed
-jobs remain there so users can retry or inspect earlier results. No automatic
-retention expiry or cleanup UI is provided yet. Learning answers and reading
+jobs remain there so users can retry or inspect earlier results.
+Supplementing an import copies only the explicitly retained files and new
+uploads into another isolated job. Unchecked files remain in the previous
+local job; excluding a file is not deletion. Revision receipts expose names,
+extraction counts and next steps, not arbitrary filesystem paths or source text.
+No automatic retention expiry or cleanup UI is provided yet. Learning answers and reading
 positions are stored in browser local storage and, when the local service is
 available, under `.study-progress/`. Deleting browser storage alone does not
 delete the workspace copies. The default double-click launcher uses

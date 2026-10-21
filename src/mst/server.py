@@ -162,6 +162,8 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                     self.reply({"job": jobs.submit(request.get("files"), request.get("subject", "generic"))}, 202)
                 elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/retry", route):
                     self.reply({"job": jobs.retry(match[1])}, 202)
+                elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/revise", route):
+                    self.reply({"job": jobs.revise(match[1], request.get("keep"), request.get("files", []))}, 202)
                 elif match := re.fullmatch(r"/api/progress/([0-9a-f]{64})", route):
                     progress = request.get("progress")
                     if len(json.dumps(request)) > 1024 * 1024 or not isinstance(progress, dict) or progress.get("version") != 2 or progress.get("course_key") != match[1]:

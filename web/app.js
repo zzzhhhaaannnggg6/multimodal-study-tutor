@@ -6,7 +6,7 @@
   const lines = (value) => esc(value).replace(/\n/g, "<br>");
   const P = window.StudyProgress;
   const emptyGuide = {title: "把这节课的材料放进来", units: [], route: {}, source_index: [], generation_report: {status: "needs-content"}};
-  const state = {guide: emptyGuide, view: "route", index: 0, description: null, progress: null, revision: 0, serverSave: false, job: null, files: [], loading: 0};
+  const state = {guide: emptyGuide, view: "route", index: 0, description: null, progress: null, revision: 0, serverSave: false, job: null, files: [], kept: new Set(), submitting: false, loading: 0};
   const units = () => list(state.guide.units);
   const active = () => units()[state.index];
   const done = (unit) => !!state.progress?.units[unit.unit_id]?.completed;
@@ -173,7 +173,26 @@
     requestAnimationFrame(() => { window.scrollTo(0, last?.scroll || 0); restoring = false; });
   }
   const stageOrder = [["inventory","材料处理"],["aligning","页面与讲解配对"],["writing","组织讲义"],["checking","内容检查"],["exporting","保存讲义"]];
+  function renderMaterials() {
+    const job = state.job;
+    const busy = state.submitting || ["queued","running"].includes(job?.status);
+    const revising = !!job && $("inputMode").value === "revise";
+    $("savedMaterials").hidden = !job;
+    $("inputMode").disabled = busy;
+    $("subject").disabled = busy || revising;
+    if (revising) $("subject").value = job.subject;
+    $("sourceFiles").disabled = busy;
+    $("generateButton").disabled = busy;
+    $("retainHint").hidden = !revising;
+    $("generateButton").textContent = revising ? "用保留和新增的材料重新生成" : "生成我的自学讲义";
+    $("materialResults").innerHTML = list(job?.materials).map((item) => `<li data-material="${esc(item.stored_name)}"><label class="material-name">${revising ? `<input type="checkbox" data-keep="${esc(item.stored_name)}" ${state.kept.has(item.stored_name) ? "checked" : ""} ${busy ? "disabled" : ""} />` : ""}<strong>${esc(item.name)}</strong><span class="material-label" data-status="${esc(item.status)}">${esc(item.label)}</span></label><p>${esc(item.detail)}</p><p class="material-action">${esc(item.action)}</p></li>`).join("");
+    $("selectedFiles").innerHTML = state.files.length ? `<p>待加入的文件（${state.files.length} 个）：</p><ul class="pending-files">${state.files.map((file, index) => `<li><span>${esc(file.name)}</span><button class="link-button" type="button" data-remove-file="${index}" ${busy ? "disabled" : ""}>移除<span class="sr-only"> ${esc(file.name)}</span></button></li>`).join("")}</ul>` : "";
+  }
   function showJob(job) {
+    if (job.job_id !== state.job?.job_id) {
+      state.kept = new Set(list(job.files).map((item) => item.stored_name));
+      $("inputMode").value = "revise";
+    }
     state.job = job;
     const busy = ["queued","running"].includes(job.status);
     if (busy || ["failed","interrupted"].includes(job.status)) $("materialPanel").open = true;
@@ -183,6 +202,7 @@
     $("jobStages").hidden = false;
     const stages = new Set(list(job.history).map((item) => item.stage));
     $("jobStages").innerHTML = stageOrder.map(([stage,label]) => `<li class="${stages.has(stage) ? "reached" : ""}">${esc(label)}</li>`).join("");
+    renderMaterials();
   }
   async function watchJob(job, showResult = true) {
     clearTimeout(jobTimer);
@@ -197,6 +217,7 @@
     }
   }
   async function submit(retry = false) {
+    state.submitting = true; renderMaterials();
     $("materialPanel").open = true;
     $("generateButton").disabled = true; $("retryJob").disabled = true;
     $("uploadMessage").textContent = retry ? "正在重新提交已保存的材料……" : "正在将所选材料保存到本机……";
@@ -204,13 +225,17 @@
       let result;
       if (retry) result = await post(`api/jobs/${state.job.job_id}/retry`, {});
       else {
-        if (!state.files.length) throw new Error("请先选择课件或教师转写。");
+        const revising = !!state.job && $("inputMode").value === "revise";
+        if (!state.files.length && (!revising || !state.kept.size)) throw new Error("请至少保留一份材料，或添加课件和教师转写。");
         if (state.files.reduce((sum,file) => sum + file.size, 0) > 100 * 1024 * 1024) throw new Error("本次材料超过 100 MB，请分课次导入。");
         const files = await Promise.all(state.files.map((file) => new Promise((resolve,reject) => {
           const reader = new FileReader(); reader.onload = () => resolve({name: file.name, data: String(reader.result).split(",")[1]}); reader.onerror = () => reject(new Error(`无法读取：${file.name}`)); reader.readAsDataURL(file);
         })));
-        result = await post("api/jobs", {files, subject: $("subject").value});
+        result = revising
+          ? await post(`api/jobs/${state.job.job_id}/revise`, {files, keep: Array.from(state.kept)})
+          : await post("api/jobs", {files, subject: $("subject").value});
       }
+      state.files = []; $("sourceFiles").value = "";
       await watchJob(result.job);
     } catch (error) {
       if (error.data?.job) await watchJob(error.data.job);
@@ -218,11 +243,15 @@
         $("uploadMessage").textContent = `${error.message} 已有讲义仍保留。`;
         $("generateButton").disabled = false;
       }
-    } finally { $("retryJob").disabled = false; }
+    } finally { state.submitting = false; renderMaterials(); $("retryJob").disabled = false; }
   }
   function selectFiles(files) {
-    state.files = Array.from(files || []);
-    $("selectedFiles").textContent = state.files.map((file) => file.name).join("、");
+    if (state.submitting || ["queued","running"].includes(state.job?.status)) return;
+    for (const file of Array.from(files || [])) {
+      if (!state.files.some((saved) => saved.name === file.name && saved.size === file.size && saved.lastModified === file.lastModified)) state.files.push(file);
+    }
+    $("sourceFiles").value = "";
+    renderMaterials();
   }
   async function boot() {
     document.addEventListener("click", (event) => {
@@ -232,6 +261,8 @@
       if (unit) navigate("learn", Number(unit.dataset.unit));
       if (view) navigate(view.dataset.view);
       if (back) { const index = units().findIndex((item) => item.unit_id === back.dataset.returnUnit); if (index >= 0) navigate("learn", index); }
+      const remove = event.target.closest("[data-remove-file]");
+      if (remove) { state.files.splice(Number(remove.dataset.removeFile), 1); renderMaterials(); }
     });
     document.addEventListener("input", (event) => {
       if (event.target.matches("[data-answer]")) { P.answer(state.progress, state.description, event.target.dataset.answer, event.target.value); save(); }
@@ -240,6 +271,12 @@
     $("resumeLearning").onclick = () => { const last = {...state.progress.reading}; navigate(last.view, Math.max(0, units().findIndex((unit) => unit.unit_id === last.unit_id)), last.scroll); };
     $("guideFile").onchange = async (event) => { const file = event.target.files?.[0]; if (file) try { await loadGuide(JSON.parse(await file.text()), true); } catch (error) { status(error.message,"error"); } };
     $("sourceFiles").onchange = (event) => selectFiles(event.target.files);
+    $("inputMode").onchange = renderMaterials;
+    $("materialResults").onchange = (event) => {
+      const key = event.target.dataset.keep;
+      if (key) { if (event.target.checked) state.kept.add(key); else state.kept.delete(key); }
+    };
+    $("showMaterials").onclick = () => { $("materialPanel").open = true; $("uploadBox").scrollIntoView({block:"start"}); $("materialPanel").querySelector("summary").focus({preventScroll:true}); };
     $("generateButton").onclick = () => submit();
     $("retryJob").onclick = () => submit(true);
     $("uploadBox").addEventListener("dragover", (event) => { event.preventDefault(); $("uploadBox").classList.add("is-dragging"); });
