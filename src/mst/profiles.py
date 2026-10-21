@@ -50,6 +50,34 @@ PROFILES: dict[str, StudyProfile] = {
         ("period", "actor", "source", "claim", "cause", "consequence"),
         ("chronology", "evidence comparison", "causal explanation", "counterclaim"),
     ),
+    "biology": StudyProfile(
+        "biology",
+        "Biology",
+        "structure -> function -> process/regulation -> evidence -> exception/application",
+        ("structure", "function", "gene", "cell", "pathway", "evidence"),
+        ("labeling", "process tracing", "evidence interpretation", "transfer"),
+    ),
+    "chemistry": StudyProfile(
+        "chemistry",
+        "Chemistry",
+        "species/conditions -> equation/model -> balancing/stoichiometry -> result -> limits",
+        ("species", "mole", "concentration", "reaction", "equilibrium", "unit"),
+        ("equation balancing", "stoichiometric calculation", "unit check", "prediction"),
+    ),
+    "law": StudyProfile(
+        "law",
+        "Law and professional rules",
+        "rule/authority -> elements/conditions -> facts/application -> exception -> conclusion",
+        ("rule", "authority", "element", "condition", "fact", "exception"),
+        ("issue spotting", "rule application", "counterargument", "structured conclusion"),
+    ),
+    "literature": StudyProfile(
+        "literature",
+        "Literature and text interpretation",
+        "question/context -> passage/form -> interpretation -> alternative reading -> supported claim",
+        ("passage", "narrator", "form", "image", "theme", "interpretation"),
+        ("close reading", "evidence comparison", "interpretation", "counter-reading"),
+    ),
 }
 
 

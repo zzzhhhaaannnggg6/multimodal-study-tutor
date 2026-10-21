@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mst.guide import StudyGuide, generate_study_guide, render_markdown, validate_study_guide
-from mst.models import LessonMap
+import pytest
+
+from mst.guide import StudyGuide, _teacher_reading, generate_study_guide, render_html, render_markdown, validate_study_guide
+from mst.models import Alignment, LessonMap, SpeechSegment, VisualFrame
 
 
 FIXTURE = Path(__file__).parents[1] / "examples" / "minimal_course" / "lesson-map.json"
@@ -23,9 +25,13 @@ class CompleteProvider:
                 "teacher_increment": "老师提醒先找事实。",
                 "tutor_bridge": "证据是起点，机制把它连接到结果。",
                 "step_chain": ["找证据", "写机制", "查结果"],
-                "worked_examples": [{"title": "完整例题", "question": "如何解释新案例？", "steps": ["找证据", "写机制"], "answer": "完成三步解释。", "variation": "改变条件后重查机制。", "complete": True}],
-                "misconceptions": [],
-                "practice_items": [{"practice_id": "p1", "prompt": "机制有什么作用？", "answer": "连接证据和结果。", "explanation": "没有机制就不能迁移。"}],
+                "worked_examples": [{"title": "完整例题", "question": "如何解释材料给出的新案例？", "setup": "已知材料记录了起因、事件经过和结果，要求解释它们的关系。", "steps": ["把记录中的起因作为候选条件。", "用事件经过中的证据说明该条件如何作用。", "将得到的预测与材料中的实际结果比较，检查有无矛盾。"], "answer": "由条件经机制得到结果，再用记录核对。", "variation": "如果事件经过出现一条相反证据，应回到机制这一步重新判断。", "complete": True}],
+                "misconceptions": [{"wrong": "先后发生就等于因果。", "correct": "还需要机制和证据。", "correction": "检查事件经过是否支持提出的因果路径。"}],
+                "practice_items": [
+                    {"practice_id": "p1", "kind": "retrieval", "prompt": "机制有什么作用？", "answer": "连接证据和结果。", "explanation": "没有机制就不能解释条件如何影响结果。"},
+                    {"practice_id": "p2", "kind": "process", "prompt": "比较候选机制与材料时先做什么？", "answer": "先写出该机制预测的结果，再与实际结果比较。", "explanation": "如果二者矛盾，就需要修改或放弃这个候选机制。"},
+                    {"practice_id": "p3", "kind": "transfer", "prompt": "新材料只改了一个前提，能直接照搬结论吗？", "answer": "不能，先检查机制是否仍然适用。", "explanation": "结论依赖前提，新条件可能使原机制失效。"}
+                ],
             },
             ensure_ascii=False,
         )
@@ -105,6 +111,11 @@ def test_computer_systems_offline_guide_uses_concrete_material_example() -> None
     assert example.complete is True
     assert "35" in example.answer
     assert len(unit.practice_items) == 3
+    assert "21" in unit.practice_items[2].answer
+    assert "旧 r5" in unit.practice_items[0].prompt
+    assert "先计算右侧" in " ".join(unit.prerequisites)
+    assert "不是标准 RISC-V" in example.setup
+    assert "r5 从 0" not in " ".join(example.steps)
 
 
 def test_visual_review_keeps_text_only_provider_output_as_draft() -> None:
@@ -151,3 +162,111 @@ def test_unit_sources_are_preserved_when_alignment_is_missing() -> None:
     assert guide.units[0].source_refs[0].ref == "lesson-01"
     assert any(item.ref == "lesson-01" for item in guide.source_index)
     assert not any(item.endswith(".source_refs") for item in guide.report.missing_fields)
+
+
+def test_pending_speech_is_visible_in_report_but_not_in_teacher_explanation() -> None:
+    segment = SpeechSegment(segment_id="s1", text="注意不要把多周期控制器状态机作为本节入门知识。", status="pending",
+                            alignment=Alignment(visual_ids=["p1"], confidence="low", status="pending"))
+    lesson = LessonMap(pages=[VisualFrame(visual_id="p1", page=1, title="入门", text="CPU 和内存", status="covered")], speech_segments=[segment])
+    guide = generate_study_guide(lesson)
+    assert "多周期控制器" not in guide.units[0].teacher_increment
+    assert guide.report.pending_segments == 1
+    assert guide.report.unresolved_items == ["s1"]
+    ref = next(ref for ref in guide.source_index if ref.ref == "s1")
+    assert ref.label == "语音配对待确认" and ref.verified is False
+    assert "语音配对待确认：1" in render_html(guide)
+    assert "展开材料与语音来源索引" in render_markdown(guide)
+    assert segment.text in render_html(guide)  # Available in the appendix.
+    assert StudyGuide.from_dict(json.loads(guide.to_json())).report.pending_segments == 1
+
+
+def test_teacher_addition_keeps_corrections_and_readable_honest_times() -> None:
+    segments = [SpeechSegment(text="这里提供额外的说明，帮助大家区分课堂涉及的不同对象。", start=i) for i in range(6)]
+    segments.append(SpeechSegment(text="注意不要把内存的地址当成这个位置存储的数据。", start=135.5, end=140, metadata={"end_inferred": True}))
+    text = _teacher_reading(segments)
+    assert "注意不要把内存" in text
+    assert "00:02:15.5 起；结束时间未标注" in text
+    assert "135.5" not in text and "00:02:20" not in text
+
+
+def test_c_code_alone_does_not_invent_a_riscv_translation() -> None:
+    guide = generate_study_guide(LessonMap(profile="computer-systems", pages=[VisualFrame(visual_id="p1", text="int x = 10; x = 2 * x + 15;", status="covered")]))
+    assert "muli" not in guide.units[0].worked_examples[0].question
+    assert "muli" not in " ".join(guide.units[0].worked_examples[0].steps)
+
+
+def test_short_provider_answer_is_not_padded_into_a_complete_lesson() -> None:
+    class ShortProvider(CompleteProvider):
+        def complete(self, **kwargs) -> str:
+            data = json.loads(super().complete(**kwargs))
+            data["worked_examples"][0].update(setup="", steps=["检查条件"], variation="")
+            data["practice_items"] = data["practice_items"][:1]
+            return json.dumps(data, ensure_ascii=False)
+
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE), ShortProvider())
+    assert guide.report.status == "draft"
+    assert guide.units[0].worked_examples[0].steps == ["检查条件"]
+    assert guide.units[0].worked_examples[0].complete is False
+    assert len(guide.units[0].practice_items) == 1
+    assert any(field.endswith("practice_items>=3") for field in guide.report.missing_fields)
+    assert not validate_study_guide(guide, strict=True).ok
+
+
+def test_provider_cannot_override_teacher_or_assessment_evidence() -> None:
+    class UnsupportedClaims(CompleteProvider):
+        def complete(self, **kwargs) -> str:
+            data = json.loads(super().complete(**kwargs))
+            data.update(teacher_increment="老师承诺这道题必考。", assessment_signal="这道题必考")
+            return json.dumps(data, ensure_ascii=False)
+
+    lesson = LessonMap.from_json(FIXTURE)
+    expected = generate_study_guide(lesson).units[0]
+    actual = generate_study_guide(lesson, UnsupportedClaims()).units[0]
+    assert actual.teacher_increment == expected.teacher_increment
+    assert actual.assessment_signal == expected.assessment_signal
+
+
+def test_provider_receives_full_page_text_beyond_reader_preview() -> None:
+    class CaptureProvider(CompleteProvider):
+        def complete(self, **kwargs) -> str:
+            prompt = json.loads(kwargs["user"])
+            context = json.loads(prompt["source_context"])
+            assert context["pages"][0]["text"].endswith("最后一条关键限制")
+            assert len(context["pages"][0]["text"]) > 260
+            return super().complete(**kwargs)
+
+    lesson = LessonMap(pages=[VisualFrame(visual_id="p1", text="说明内容。" * 100 + "最后一条关键限制", status="covered")])
+    guide = generate_study_guide(lesson, CaptureProvider())
+    assert not any("模型补全失败" in warning for warning in guide.report.warnings)
+
+
+def test_new_report_fields_keep_json_schema_compatibility() -> None:
+    jsonschema = pytest.importorskip("jsonschema")
+    schema = json.loads((FIXTURE.parents[2] / "schemas" / "study-guide.schema.json").read_text())
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE), CompleteProvider())
+    jsonschema.Draft202012Validator(schema).validate(guide.to_dict())
+
+
+def test_html_review_has_return_link_and_source_quotes_are_escaped() -> None:
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE))
+    guide.source_index[0].quote = '<script>alert("source data")</script>'
+    document = render_html(guide)
+    assert f'id="{guide.units[0].unit_id}"' in document
+    assert f'href="#{guide.units[0].unit_id}"' in document
+    assert "回到对应讲解" in document
+    assert '<script>alert("source data")</script>' not in document
+    assert "&lt;script&gt;" in document
+
+
+def test_provider_cannot_invent_example_source_locators() -> None:
+    class InventedSource(CompleteProvider):
+        def complete(self, **kwargs) -> str:
+            data = json.loads(super().complete(**kwargs))
+            data["worked_examples"][0]["source_refs"] = [{"ref": "invented-page", "kind": "teacher", "page": 999, "verified": True}]
+            return json.dumps(data, ensure_ascii=False)
+
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE), InventedSource())
+    assert guide.report.status == "draft"
+    assert guide.units[0].status == "draft"
+    assert all(ref.ref != "invented-page" for ref in guide.units[0].worked_examples[0].source_refs)
+    assert any("未提供的来源" in warning for warning in guide.report.warnings)

@@ -20,6 +20,13 @@ Before publishing a project or example:
       screenshots and code blocks are either reviewed or visibly left pending.
 - [ ] Inspect speech-role counts and alignment candidates; reject weak page
       matches and keep genuine classroom supplements separate.
+- [ ] Try a transcript from a different lesson: it must remain pending when
+      source support is insufficient, and must not enter the guide's teacher
+      explanation. Check that timestamp-only paragraphs do not become quotes.
+- [ ] Reject short model answers rather than padding example steps or missing
+      practice roles. Keep assessment signals tied to the evidence layer.
+- [ ] Check plain, single-headed and double-headed connections separately;
+      inspect rotated/grouped arrows and explicit super/subscripts.
 - [ ] Search tracked text for `/Users/`, `/home/`, Windows user paths, API
       keys, teacher names, private transcript text, and unlicensed media.
 - [ ] Confirm raw PPT, DOCX, audio, screenshots and generated private outputs

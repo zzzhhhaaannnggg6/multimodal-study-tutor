@@ -54,8 +54,17 @@
 
   function sourceLocation(source) {
     if (source.page !== undefined && source.page !== null) return `第 ${source.page} 页`;
-    if (source.start !== undefined && source.start !== null) return `${source.start}–${source.end ?? "?"}`;
+    if (source.start !== undefined && source.start !== null) return source.end !== undefined && source.end !== null ? `${formatTimestamp(source.start)}–${formatTimestamp(source.end)}` : `${formatTimestamp(source.start)} 起（结束未标注）`;
     return source.ref || "待定位";
+  }
+
+  function formatTimestamp(value) {
+    const seconds = String(value).split(":").reverse().reduce((sum, part, index) => sum + Number(part) * (60 ** index), 0);
+    if (!Number.isFinite(seconds) || seconds < 0) return String(value);
+    const milliseconds = Math.round(seconds * 1000);
+    const whole = Math.floor(milliseconds / 1000);
+    const fraction = milliseconds % 1000 ? "." + String(milliseconds % 1000).padStart(3, "0").replace(/0+$/, "") : "";
+    return [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60].map((part) => String(part).padStart(2, "0")).join(":") + fraction;
   }
 
   function render() {
@@ -69,12 +78,9 @@
     $("prerequisites").innerHTML = list(route.prerequisites).map((item) => `<li>${lines(item)}</li>`).join("") || "<li>暂无额外先修要求</li>";
     $("unitCount").textContent = `${units().length} 个知识单元`;
     $("draftNotice").hidden = guide.report?.status === "complete";
-    const warningCount = list(guide.report?.warnings).length;
     const visualPending = Number(guide.report?.visual_review_pages || 0);
-    const supplementCount = Number(guide.report?.supplement_segments || 0);
-    $("draftText").textContent = warningCount || visualPending || supplementCount
-      ? `页面文字已读出；${visualPending} 页需要视觉复核，${supplementCount} 段语音保留为课堂补充。`
-      : "已保留可定位来源；当前没有待确认的视觉或语音结构。";
+    const speechPending = Number(guide.report?.pending_segments || 0);
+    $("draftText").textContent = `讲义仍需内容核验。${visualPending ? `${visualPending} 页图示或公式待复核。` : ""}${speechPending ? `${speechPending} 段语音尚未配准，未加入本课讲解。` : ""}详情可在来源附录查看。`;
     const done = completionCount();
     const total = units().length;
     $("progressBar").style.width = total ? `${Math.round(done / total * 100)}%` : "0%";
@@ -135,7 +141,8 @@
     const report = state.guide.report || {};
     const roleLabels = { assessment: "评价", correction: "纠错", definition: "定义", derivation: "推导", example: "例题", emphasis: "强调", question: "提问", general: "讲解" };
     const roleText = Object.entries(report.speech_role_counts || {}).map(([role, count]) => `${roleLabels[role] || role} ${count}`).join("；") || "暂无语音片段";
-    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(report.status || "未知")}</span></div><div><b>页面文字覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>需要视觉复核</b><span>${report.visual_review_pages ?? 0} 页</span></div><div><b>时间片段已对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div><div><b>课堂补充片段</b><span>${report.supplement_segments ?? 0}</span></div><div><b>语音内容分类</b><span>${esc(roleText)}</span></div>`;
+    const statusLabel = { complete: "可开始学习", draft: "内容待核验", "needs-content": "等待补充材料" }[report.status] || "待检查";
+    $("sourceSummary").innerHTML = `<div><b>生成状态</b><span>${esc(statusLabel)}</span></div><div><b>页面文字覆盖</b><span>${report.covered_pages ?? 0} / ${report.total_pages ?? 0}</span></div><div><b>需要视觉复核</b><span>${report.visual_review_pages ?? 0} 页</span></div><div><b>时间片段已对齐</b><span>${report.aligned_segments ?? 0} / ${report.total_segments ?? 0}</span></div><div><b>语音配对待确认</b><span>${report.pending_segments ?? 0}</span></div><div><b>课堂补充片段</b><span>${report.supplement_segments ?? 0}</span></div><div><b>课堂事务/导出信息</b><span>${report.navigation_segments ?? 0}</span></div><div><b>语音内容分类</b><span>${esc(roleText)}</span></div>`;
     $("sourceList").innerHTML = renderSourceList(list(state.guide.source_index));
   }
 

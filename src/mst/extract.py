@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import subprocess
 import zipfile
-from math import hypot
+from math import cos, hypot, radians, sin
 from pathlib import Path
 from typing import Iterable
 from xml.etree import ElementTree
@@ -75,113 +75,258 @@ def parse_timestamped_text(path: str | Path) -> list[SpeechSegment]:
 
 
 def extract_docx_transcript(path: str | Path) -> list[SpeechSegment]:
-    """Extract paragraph text from a DOCX transcript without OCR.
+    """Group timestamp headers with their following speech paragraphs.
 
-    Timestamp tokens such as ``00:12`` or ``00:01:12`` are retained as cue
-    starts when present. DOCX screenshots and drawings are deliberately not
-    treated as speech; a later media extractor can add them as visual frames.
+    Keep original paragraphs in metadata. The next marker is only an inferred
+    cue boundary, not a measured end of speech; never infer across a clock reset.
     """
 
     source = Path(path)
     with zipfile.ZipFile(source) as archive:
         xml = archive.read("word/document.xml")
     root = ElementTree.fromstring(xml)
-    paragraphs: list[str] = []
-    for paragraph in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+    paragraphs: list[tuple[int, str]] = []
+    for position, paragraph in enumerate(root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"), 1):
         text = "".join(
             node.text or ""
             for node in paragraph.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
         ).strip()
         if text:
-            paragraphs.append(text)
-    timestamp = re.compile(r"(?<!\d)(\d{1,2}:\d{2}(?::\d{2})?)(?!\d)")
+            paragraphs.append((position, text))
+    timestamp = re.compile(r"^\s*[\[【（(]?((?:\d{1,2}:)?[0-5]?\d:[0-5]\d(?:[.,]\d+)?)[\]】）)]?(?:\s*[|｜·•]\s*|\s+|$)")
+    has_markers = any(timestamp.match(text) for _, text in paragraphs)
+    cues: list[dict] = []
+    current: dict | None = None
+    block = 0
+    for position, paragraph in paragraphs:
+        match = timestamp.match(paragraph)
+        if match:
+            start = timestamp_seconds(match.group(1))
+            if current and current["start"] is not None and start <= current["start"]:
+                block += 1
+            current = {"start": start, "texts": [], "raw": [], "positions": [], "block": block}
+            cues.append(current)
+            cleaned = paragraph[match.end():].strip()
+        else:
+            cleaned = paragraph
+            if current is None:
+                current = {"start": None, "texts": [], "raw": [], "positions": [], "block": block}
+                cues.append(current)
+        current["raw"].append(paragraph)
+        current["positions"].append(position)
+        if cleaned:
+            current["texts"].append(cleaned)
     segments: list[SpeechSegment] = []
-    for paragraph in paragraphs:
-        match = timestamp.search(paragraph)
-        start = timestamp_seconds(match.group(1)) if match else None
+    for index, cue in enumerate(cues):
+        start = cue["start"]
+        cleaned = "\n".join(cue["texts"])
+        export_header = bool(re.search(r"授课老师[：:]|课程名称[：:]|\d{4}[-/]\d{1,2}[-/]\d{1,2}", cleaned))
+        administrative = not cleaned or (has_markers and start is None and export_header and len(cleaned) <= 160)
+        following = cues[index + 1] if index + 1 < len(cues) else None
+        end = following["start"] if (
+            following and start is not None and following["start"] is not None
+            and following["start"] > start and following["block"] == cue["block"]
+        ) else None
         segments.append(
             SpeechSegment(
-                segment_id=f"{source.stem}::s{len(segments) + 1:04d}",
+                segment_id=f"{source.stem}::s{index + 1:04d}",
                 source_id=source.stem,
                 media_id=source.stem,
                 start=start,
-                text=paragraph,
-                transcript=paragraph,
+                end=end,
+                text=cleaned,
+                kind="administrative" if administrative else "lecture",
+                transcript=cleaned,
                 status="pending",
-                notes="DOCX paragraph extracted; timestamp/end alignment requires review.",
-                metadata=annotate_speech_metadata({}, paragraph),
+                notes=(
+                    "DOCX cue grouped; end is an inferred boundary at the next marker, not a measured speech end."
+                    if end is not None
+                    else "DOCX paragraph extracted; no reliable end timestamp was available."
+                ),
+                metadata={
+                    **annotate_speech_metadata({}, cleaned),
+                    "raw_transcript": "\n".join(cue["raw"]),
+                    "paragraph_numbers": cue["positions"],
+                    "timeline_block": cue["block"],
+                    "end_inferred": end is not None,
+                    "administrative": administrative,
+                },
             )
         )
     return segments
 
 
 def _pptx_diagram_graph(root: ElementTree.Element) -> tuple[list[str], list[str]]:
-    """Read labelled PPTX nodes and connector endpoints when present.
+    """Read connectivity separately from arrow direction; all remain cues.
 
-    PowerPoint stores connector endpoint IDs in ``a:stCxn``/``a:endCxn``.
-    When an exporter omits those IDs, the fallback uses the nearest two shape
-    centres and marks the result as an undirected candidate in the text.  It is
-    intentionally a review cue rather than a verified diagram interpretation.
+    Explicit endpoint IDs do not imply a direction. Geometric fallback is
+    local and requires usable transforms for every containing group.
     """
 
     p = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
     a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    parents = {child: parent for parent in root.iter() for child in parent}
+
+    def box_transform(xfrm):
+        if xfrm is None:
+            return None
+        off, ext = xfrm.find(f"{a}off"), xfrm.find(f"{a}ext")
+        if off is None or ext is None:
+            return None
+        try:
+            x, y = float(off.get("x")), float(off.get("y"))
+            w, h = float(ext.get("cx")), float(ext.get("cy"))
+            angle = radians(float(xfrm.get("rot", "0")) / 60000)
+        except (ValueError, TypeError):
+            return None
+
+        def point(u, v):
+            dx = (u - 0.5) * w * (-1 if xfrm.get("flipH") in {"1", "true"} else 1)
+            dy = (v - 0.5) * h * (-1 if xfrm.get("flipV") in {"1", "true"} else 1)
+            return (x + w / 2 + dx * cos(angle) - dy * sin(angle),
+                    y + h / 2 + dx * sin(angle) + dy * cos(angle))
+
+        return point
+
+    def geometry(element):
+        property_tag = "grpSpPr" if element.tag == f"{p}grpSp" else "spPr"
+        point = box_transform(element.find(f"./{p}{property_tag}/{a}xfrm"))
+        if point is None:
+            return None
+        group_transforms = []
+        ancestor = parents.get(element)
+        while ancestor is not None:
+            if ancestor.tag == f"{p}grpSp":
+                xfrm = ancestor.find(f"./{p}grpSpPr/{a}xfrm")
+                group_point = box_transform(xfrm)
+                if group_point is None:
+                    return None
+                child_off, child_ext = xfrm.find(f"{a}chOff"), xfrm.find(f"{a}chExt")
+                if child_off is None or child_ext is None:
+                    return None
+                try:
+                    ox, oy = float(child_off.get("x")), float(child_off.get("y"))
+                    sx, sy = float(child_ext.get("cx")), float(child_ext.get("cy"))
+                    if sx <= 0 or sy <= 0:
+                        return None
+                except (ValueError, TypeError):
+                    return None
+                group_transforms.append((group_point, ox, oy, sx, sy))
+            ancestor = parents.get(ancestor)
+
+        def slide_point(u, v):
+            x, y = point(u, v)
+            for group_point, ox, oy, sx, sy in group_transforms:
+                x, y = group_point((x - ox) / sx, (y - oy) / sy)
+            return x, y
+
+        corners = [slide_point(u, v) for u, v in ((0, 0), (1, 0), (0, 1), (1, 1))]
+        bbox = (min(t[0] for t in corners), min(t[1] for t in corners),
+                max(t[0] for t in corners), max(t[1] for t in corners))
+        return slide_point, bbox
+    def clean_label(value: str) -> str:
+        compact = " ".join(value.split())
+        return compact if len(compact) <= 120 else compact[:117].rstrip() + "…"
+
+    def bbox_distance(point: tuple[float, float], bbox: tuple[float, float, float, float]) -> float:
+        x, y = point
+        left, top, right, bottom = bbox
+        dx = max(left - x, 0.0, x - right)
+        dy = max(top - y, 0.0, y - bottom)
+        return hypot(dx, dy)
+
     node_rows: dict[str, dict[str, object]] = {}
+    arrow_shapes: list[dict[str, object]] = []
     for tag in ("sp", "graphicFrame", "pic"):
         for element in root.findall(f".//{p}{tag}"):
             props = element.find(f".//{p}cNvPr")
             node_id = props.get("id") if props is not None else None
             if not node_id:
                 continue
-            label = " ".join(
+            label = clean_label(" ".join(
                 node.text.strip()
                 for node in element.iter(f"{a}t")
                 if node.text and node.text.strip()
-            )
-            xfrm = element.find(f".//{a}xfrm")
-            off = xfrm.find(f"{a}off") if xfrm is not None else None
-            ext = xfrm.find(f"{a}ext") if xfrm is not None else None
-            try:
-                x = float(off.get("x", "0")) if off is not None else 0.0
-                y = float(off.get("y", "0")) if off is not None else 0.0
-                cx = float(ext.get("cx", "0")) if ext is not None else 0.0
-                cy = float(ext.get("cy", "0")) if ext is not None else 0.0
-            except (TypeError, ValueError):
-                x = y = cx = cy = 0.0
+            ))
+            shape_geometry = geometry(element)
+            preset_node = element.find(f".//{a}prstGeom")
+            preset = preset_node.get("prst", "") if preset_node is not None else ""
+            if tag == "sp" and preset.lower() in {"leftrightarrow", "updownarrow", "rightarrow", "leftarrow", "uparrow", "downarrow"}:
+                if shape_geometry:
+                    arrow_shapes.append({"preset": preset.lower(), "geometry": shape_geometry})
+                continue  # The arrow's own label cannot be an endpoint node.
+            if not label or label.isdigit():
+                continue
+            # Decorative boxes and their centered label are often grouped.
+            # Use that group's extent only if it has exactly this one label.
+            ancestor = parents.get(element)
+            while ancestor is not None and ancestor.tag == f"{p}grpSp":
+                group_label = clean_label(" ".join(t.text.strip() for t in ancestor.iter(f"{a}t") if t.text and t.text.strip()))
+                group_geometry = geometry(ancestor)
+                if group_label != label or group_geometry is None:
+                    break
+                shape_geometry = group_geometry
+                ancestor = parents.get(ancestor)
             node_rows[str(node_id)] = {
-                "label": label or f"节点 {node_id}",
-                "center": (x + cx / 2.0, y + cy / 2.0),
+                "label": label,
+                "bbox": shape_geometry[1] if shape_geometry else None,
+                "fallback": element.find(f".//{p}ph") is None and len(label) <= 60,
             }
 
     nodes = [str(row["label"]) for row in node_rows.values() if str(row["label"]).strip()]
     edges: list[str] = []
+    def connector_direction(connector: ElementTree.Element) -> str:
+        head = connector.find(f"./{p}spPr/{a}ln/{a}headEnd")
+        tail = connector.find(f"./{p}spPr/{a}ln/{a}tailEnd")
+        at_start = head is not None and head.get("type") not in {None, "none"}
+        at_end = tail is not None and tail.get("type") not in {None, "none"}
+        return "↔" if at_start and at_end else "←" if at_start else "→" if at_end else "—"
+
+    def nearest(point, length, excluded=None):
+        candidates = []
+        for node_id, row in node_rows.items():
+            bbox = row["bbox"]
+            if node_id == excluded or bbox is None or not row["fallback"]:
+                continue
+            size = min(bbox[2] - bbox[0], bbox[3] - bbox[1])
+            distance = bbox_distance(point, bbox)
+            if distance <= min(length * 0.25, size * 0.5):
+                candidates.append((distance, node_id))
+        candidates.sort()
+        if not candidates or (len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < max(1e-6, length * 0.02)):
+            return None
+        return candidates[0][1]
+
     for connector in root.findall(f".//{p}cxnSp"):
         start = connector.find(f".//{a}stCxn")
         end = connector.find(f".//{a}endCxn")
         start_id = start.get("id") if start is not None else None
         end_id = end.get("id") if end is not None else None
-        if start_id in node_rows and end_id in node_rows:
-            edges.append(f"{node_rows[start_id]['label']} → {node_rows[end_id]['label']}")
-            continue
-        xfrm = connector.find(f".//{a}xfrm")
-        off = xfrm.find(f"{a}off") if xfrm is not None else None
-        ext = xfrm.find(f"{a}ext") if xfrm is not None else None
-        try:
-            center = (
-                float(off.get("x", "0")) + (float(ext.get("cx", "0")) if ext is not None else 0.0) / 2.0,
-                float(off.get("y", "0")) + (float(ext.get("cy", "0")) if ext is not None else 0.0) / 2.0,
-            )
-        except (TypeError, ValueError):
-            center = (0.0, 0.0)
-        nearest = sorted(
-            (
-                (hypot(center[0] - row["center"][0], center[1] - row["center"][1]), row["label"])
-                for row in node_rows.values()
-            ),
-            key=lambda item: item[0],
-        )[:2]
-        if len(nearest) == 2:
-            edges.append(f"{nearest[0][1]} ↔ {nearest[1][1]}")
+        connector_geometry = geometry(connector)
+        if connector_geometry:
+            point, _ = connector_geometry
+            first, last = point(0, 0), point(1, 1)
+            length = hypot(last[0] - first[0], last[1] - first[1])
+            if start_id not in node_rows:
+                start_id = nearest(first, length, end_id)
+            if end_id not in node_rows:
+                end_id = nearest(last, length, start_id)
+        if start_id in node_rows and end_id in node_rows and start_id != end_id:
+            edges.append(f"{node_rows[start_id]['label']} {connector_direction(connector)} {node_rows[end_id]['label']}")
+
+    # Preset arrows carry direction in their geometry, including rotation and
+    # flips. Only attach labels close to both ends; do not guess across a slide.
+    for arrow in arrow_shapes:
+        preset = str(arrow["preset"])
+        point, _ = arrow["geometry"]
+        vertical = preset in {"uparrow", "downarrow", "updownarrow"}
+        first, last = (point(0.5, 0), point(0.5, 1)) if vertical else (point(0, 0.5), point(1, 0.5))
+        length = hypot(last[0] - first[0], last[1] - first[1])
+        start_id = nearest(first, length)
+        end_id = nearest(last, length, start_id)
+        direction = "↔" if preset in {"leftrightarrow", "updownarrow"} else "←" if preset in {"leftarrow", "uparrow"} else "→"
+        if start_id and end_id and start_id != end_id:
+            edges.append(f"{node_rows[start_id]['label']} {direction} {node_rows[end_id]['label']}")
     return nodes, _unique_graph_edges(edges)
 
 
@@ -196,12 +341,48 @@ def _unique_graph_edges(edges: Iterable[str]) -> list[str]:
     return result
 
 
+def _pptx_text(root: ElementTree.Element) -> str:
+    """Preserve paragraph boundaries and explicit run super/subscripts."""
+    a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    paragraphs = []
+    parents = {child: parent for parent in root.iter() for child in parent}
+    for paragraph in root.iter(f"{a}p"):
+        ancestor = parents.get(paragraph)
+        while ancestor is not None and not ancestor.tag.endswith("}sp"):
+            ancestor = parents.get(ancestor)
+        if ancestor is not None and ancestor.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}ph[@type='sldNum']") is not None:
+            continue
+        parts = []
+        defaults = paragraph.find(f"./{a}pPr/{a}defRPr")
+        for run in paragraph:
+            if run.tag == f"{a}br":
+                parts.append("\n")
+                continue
+            text = "".join(t.text or "" for t in run.iter(f"{a}t"))
+            if not text:
+                continue
+            props = run.find(f"{a}rPr")
+            baseline = props.get("baseline") if props is not None else None
+            if baseline is None and defaults is not None:
+                baseline = defaults.get("baseline")
+            try:
+                offset = int(baseline or 0)
+            except ValueError:
+                offset = 0
+            if offset:
+                text = ("^" if offset > 0 else "_") + "{" + text + "}"
+            parts.append(text)
+        text = "".join(parts).strip()
+        if text:
+            paragraphs.append(text)
+    return "\n".join(paragraphs)
+
+
 def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
     """Extract visible text from a PPTX without requiring python-pptx."""
 
     source = Path(path)
     pages: list[VisualFrame] = []
-    namespace = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
     drawing_namespace = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
     presentation_namespace = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
     with zipfile.ZipFile(source) as archive:
@@ -214,11 +395,7 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
         )
         for page_number, name in enumerate(slide_names, 1):
             root = ElementTree.fromstring(archive.read(name))
-            text = " ".join(
-                node.text.strip()
-                for node in root.iter(f"{namespace}t")
-                if node.text and node.text.strip()
-            )
+            text = _pptx_text(root)
             shape_counts = {
                 "shape": len(root.findall(f".//{presentation_namespace}sp")),
                 "picture": len(root.findall(f".//{presentation_namespace}pic")),
@@ -239,7 +416,7 @@ def extract_pptx_pages(path: str | Path) -> list[VisualFrame]:
                 diagram_edges=diagram_edges,
             )
             domain = signals.get("domain_signals", {})
-            title = text.split(" ", 1)[0] if text else f"Slide {page_number}"
+            title = next((line for line in text.splitlines() if not line.strip().isdigit()), f"Slide {page_number}")
             pages.append(
                 VisualFrame(
                     visual_id=f"{source.stem}::p{page_number:03d}",

@@ -94,6 +94,8 @@ def test_agent_keeps_query_grounded() -> None:
 
 def test_common_subject_profiles_keep_domain_specific_learning_chains() -> None:
     profiles = {item.profile_id: item for item in list_profiles()}
-    assert {"generic", "computer-systems", "mathematics", "physics", "history"} <= set(profiles)
+    assert {"generic", "computer-systems", "mathematics", "physics", "history", "biology", "chemistry", "law", "literature"} <= set(profiles)
     assert "units" in profiles["physics"].trace_template
     assert "source/evidence" in profiles["history"].trace_template
+    assert "stoichiometry" in profiles["chemistry"].trace_template
+    assert "elements/conditions" in profiles["law"].trace_template

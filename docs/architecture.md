@@ -45,7 +45,23 @@ The deterministic signal layer can detect structure in extracted text and PPTX
 shape XML, but it does not claim to read a screenshot, recognize an equation
 from pixels, or hear an audio file without a speech provider. Pages with images,
 formulas or connectors receive a visible visual-review flag; transcript
-segments without lexical anchors remain classroom supplements or unresolved.
+segments without adequate source-text anchors remain pending. A supplement
+must be explicitly identified; absence of a match is not evidence that speech
+belongs to the same lesson.
+
+DOCX extraction groups separate timestamp paragraphs with their speech and
+records raw paragraph positions, clock resets, and inferred boundaries.
+Alignment ignores generated visual summaries, bare numbers and page markers;
+it normalizes a small bilingual computer-systems glossary and coalesces
+overlapping Chinese bigrams before counting independent anchors. A transcript
+with little page support is held for pairing review. These are conservative
+heuristics, not semantic alignment or verified classroom order.
+
+The guide provider receives complete text from every page and supported speech
+segment in a unit, rather than the learner's short preview. Provider output
+cannot override source-derived teacher excerpts or assessment signals. Missing
+example steps and practice roles remain missing; generic filler cannot upgrade
+them to a complete lesson.
 
 The repository now includes a local rendered-page adapter and an optional
 `VisionProvider`/`OpenAIVisionProvider`. A review screen for accepting or
