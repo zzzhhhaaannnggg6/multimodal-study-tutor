@@ -11,6 +11,8 @@ from __future__ import annotations
 import html
 import json
 import math
+import re
+from fractions import Fraction
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +22,8 @@ from .multimodal import classify_speech_text, extract_speech_increment, speech_r
 from .io import active_project_dir, project_paths, read_json, write_json
 from .models import Claim, Evidence, KnowledgeUnit, LessonMap, SpeechSegment, VisualFrame, coerce_lesson_map
 from .profiles import PROFILES
+from .numerals import number_example
+from .answer_checks import BASES, LITERAL, answer_values
 from .planning import offline_course, order_units, propose_course
 from .teaching import repeated_explanations, specific_steps, teaching_issues
 
@@ -295,6 +299,9 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
     compact = " ".join(text.split())
     if profile != "computer-systems":
         return None
+    conversion = number_example(text)
+    if conversion:
+        return conversion
     instructions = [(_text(row["opcode"]).lower(), tuple(_text(op).lower() for op in row["operands"])) for row in visual_signals(text)["code_candidates"]]
     expected = [("addi", ("r5", "r0", "10")), ("muli", ("r5", "r5", "2")), ("addi", ("r5", "r5", "15"))]
     if "int x = 10" in compact and "2 * x + 15" in compact and any(instructions[i:i + 3] == expected for i in range(len(instructions) - 2)):
@@ -399,67 +406,8 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
             "answer": "每一层都把上一层的意图变成自己能处理的对象；ISA 是软件和硬件之间的稳定接口。",
             "variation": "如果只更换内部数据通路而保持 ISA 不变，上层程序的写法可以保持不变，这正是接口分层的价值。",
         }
-    if "(123.456)" in compact and "(100101.01)" in compact:
-        return {
-            "question": "如何把一个带小数的进制数读成它的十进制含义？",
-            "setup": "课件用 123.456₁₀ 和 100101.01₂ 展示位置权重；小数点右侧使用负次方。",
-            "steps": [
-                "按位置写出每一位对应的 radix 次方。",
-                "分别计算整数部分和小数部分，注意小数点右侧的指数从 -1 开始。",
-                "把两部分相加，并检查每个数字是否小于 radix。",
-            ],
-            "answer": "位值不是由数字本身决定，而是由数字和所在位置共同决定；小数位使用负次方。",
-            "variation": "把 radix 从 2 换成 16 时，步骤不变，只需将每个位置权重换成 16 的次方。",
-        }
-    if "123.456" in compact and "100101.01" in compact:
-        return {
-            "question": "如何把一个带小数的进制数读成它的十进制含义？",
-            "setup": "课件用十进制 123.456 和二进制 100101.01 展示位置权重；小数点右侧使用负次方。",
-            "steps": [
-                "按位置写出每一位对应的 radix 次方。",
-                "分别计算整数部分和小数部分，注意小数点右侧的指数从 -1 开始。",
-                "把两部分相加，并检查每个数字是否小于 radix。",
-            ],
-            "answer": "位值由数字和所在位置共同决定；小数位使用负次方。",
-            "variation": "把 radix 从 2 换成 16 时，步骤不变，只需将每个位置权重换成 16 的次方。",
-        }
-    if "100101.01" in compact and "37.25" in compact:
-        return {
-            "question": "把二进制数 `(100101.01)₂` 转换成十进制。",
-            "setup": "整数部分按 2 的非负次方展开，小数部分按 2 的负次方展开。",
-            "steps": [
-                "整数部分：1×2⁵+0×2⁴+0×2³+1×2²+0×2¹+1×2⁰=37。",
-                "小数部分：0×2⁻¹+1×2⁻²=0.25。",
-                "相加得到 37+0.25=37.25。",
-            ],
-            "answer": "`(100101.01)₂ = (37.25)₁₀`。",
-            "variation": "如果最后一位从 1 改为 0，小数部分减少 2⁻²=0.25，结果变为 37。",
-        }
-    if "3A.CH" in compact and "58.75" in compact:
-        return {
-            "question": "把十六进制数 `(3A.C)₁₆` 转换成十进制。",
-            "setup": "A=10、C=12；按位置展开整数位和小数位。",
-            "steps": [
-                "整数部分：3×16¹+10×16⁰=58。",
-                "小数部分：12×16⁻¹=0.75。",
-                "相加得到 58.75，并检查 C 是否被正确解释成 12。",
-            ],
-            "answer": "`(3A.C)₁₆ = (58.75)₁₀`。",
-            "variation": "把 C 改成 8 时，只需把小数贡献从 12/16 改成 8/16。",
-        }
-    if "135.6875" in compact and "10000111.1011" in compact:
-        return {
-            "question": "把十进制数 135.6875 转换成二进制。",
-            "setup": "整数部分使用重复除 2，小数部分使用重复乘 2，最后拼接。",
-            "steps": [
-                "135 的二进制是 10000111。",
-                "0.6875 反复乘 2，取每次结果的整数位，得到 0.1011。",
-                "拼接整数和小数部分，得到 10000111.1011。",
-            ],
-            "answer": "`135.6875₁₀ = 10000111.1011₂`。",
-            "variation": "只改变小数部分时，整数部分的转换不变；重新做重复乘 2 的过程即可。",
-        }
-    if "01100" in compact and "10001" in compact and "multiple bit binary addition" in compact.lower():
+    unsigned_context = not re.search(r"补码|反码|原码|two.s complement|\bsigned\b|有符号", compact, re.I)
+    if "01100" in compact and "10001" in compact and "multiple bit binary addition" in compact.lower() and unsigned_context:
         return {
             "question": "计算二进制加法 `01100₂ + 10001₂`，并说明进位如何处理。",
             "setup": "从最低位向最高位逐列相加；最低位的 carry-in 为 0。",
@@ -471,7 +419,7 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
             "answer": "结果为 `11101₂`（十进制 29）；验证时要同时检查每一列的和与进位。",
             "variation": "若最低位 carry-in 改为 1，相当于结果再加 1，需要重新处理从最低位开始的进位链。",
         }
-    if "10110" in compact and "10010" in compact and "minuend" in compact.lower():
+    if "10110" in compact and "10010" in compact and "minuend" in compact.lower() and unsigned_context:
         return {
             "question": "计算二进制减法 `10110₂ - 10010₂`，并检查借位。",
             "setup": "从最低位向最高位逐列相减；需要借位时，把借位传给左侧。",
@@ -482,18 +430,6 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
             ],
             "answer": "`10110₂ - 10010₂ = 00100₂`。",
             "variation": "如果减数大于被减数，先判断结果为负，再按材料要求交换并在结果前标记负号。",
-        }
-    if "635" in compact and "octal to hexadecimal" in compact.lower():
-        return {
-            "question": "把八进制 `635.177₈` 转换成十六进制，为什么要经过二进制？",
-            "setup": "八进制每位对应 3 个二进制位，十六进制每位对应 4 个二进制位。",
-            "steps": [
-                "先把每个八进制数字替换成 3 位二进制，并在小数点两侧分组。",
-                "从小数点开始按 4 位重新分组，不足的位用 0 补齐。",
-                "把每组 4 位换成十六进制数字，得到 `19D.3F8₁₆`。",
-            ],
-            "answer": "经过二进制分组可以直接得到 `635.177₈ = 19D.3F8₁₆`；中间分组不能跨过小数点。",
-            "variation": "换成二进制转八进制时，改用每 3 位一组，规则完全对应。",
         }
     if ("2 10 (1024)" in compact and "2 20" in compact) or ("2^{10}" in compact and "2^{20}" in compact):
         return {
@@ -1009,14 +945,14 @@ def _make_example(
     steps = [f"第 {index} 步：{part}" for index, part in enumerate(chain, 1)]
     if derived:
         return WorkedExample(
-            title="完整例题",
+            title="完整例题" if derived.get("complete", True) else "例题（材料与计算冲突，待确认）",
             question=derived["question"],
             setup=derived["setup"],
             steps=derived["steps"],
             answer=derived["answer"],
             variation=derived["variation"],
             source_refs=refs,
-            complete=True,
+            complete=derived.get("complete", True),
         )
     if raw:
         question = raw
@@ -1152,6 +1088,38 @@ def _check_example_completeness(unit: LearningUnit) -> None:
             example.title = "例题（条件、步骤或变式待补全）"
 
 
+def _numerical_issues(unit: LearningUnit) -> list[str]:
+    """Check only explicitly recognized positional conversions, not all prose."""
+    source = "\n".join(ref.quote or "" for ref in unit.source_refs if ref.kind == "material")
+    derived = number_example(source)
+    if not derived or derived.get("source_conflict"):
+        return []
+    spec = derived["answer_check"]
+    value = Fraction(spec["value"])
+    issues = []
+    if unit.worked_examples and unit.worked_examples[0].complete:
+        example = unit.worked_examples[0]
+        source_numbers = [(row["digits"].upper(), BASES[row["base"]]) for row in LITERAL.finditer(example.question)]
+        if source_numbers != [(spec["source"].upper(), spec["source_base"])]:
+            issues.append("worked_examples.numeric_source_unverified")
+        try:
+            if answer_values(example.answer, spec["target_base"]) != [value]:
+                issues.append("worked_examples.numeric_answer_unverified")
+        except ValueError:
+            issues.append("worked_examples.numeric_answer_unverified")
+    transfer = [item for item in unit.practice_items if item.kind == "transfer"]
+    try:
+        if len(transfer) != 1 or answer_values(transfer[0].answer, spec["target_base"]) != [value + Fraction(spec["delta"])]:
+            issues.append("practice_items.numeric_transfer_unverified")
+    except ValueError:
+        issues.append("practice_items.numeric_transfer_unverified")
+    process = [item for item in unit.practice_items if item.kind == "process"]
+    decimal = re.search(r"十进制\s+([+-]?\d+(?:\.\d+)?)", process[0].answer) if len(process) == 1 else None
+    if decimal is None or Fraction(decimal[1]) != value:
+        issues.append("practice_items.numeric_process_unverified")
+    return issues
+
+
 def _quality_issues(unit: LearningUnit) -> list[str]:
     """Return learner-facing completeness failures for one core unit."""
 
@@ -1191,7 +1159,7 @@ def _quality_issues(unit: LearningUnit) -> list[str]:
         issues.append("practice_roles")
     if not unit.misconceptions:
         issues.append("misconceptions")
-    return list(dict.fromkeys([*issues, *teaching_issues(unit)]))
+    return list(dict.fromkeys([*issues, *teaching_issues(unit), *_numerical_issues(unit)]))
 
 
 def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tuple[LearningUnit, str | None]:
@@ -1209,6 +1177,12 @@ def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tu
             "practice_items (must include retrieval, process and transfer)",
         ],
     }
+    if number_example("\n".join(ref.quote or "" for ref in unit.source_refs if ref.kind == "material")):
+        prompt["numerical_contract"] = {
+            "preserve": "保留例题的原数、进制和已有过程题/迁移题的条件；补充解释时不能换成另一道题。",
+            "notation": "例题和迁移题答案用 (数字)₂、(数字)₈、(数字)₁₀ 或 (数字)₁₆；循环小数的循环节放在括号里。",
+            "process_answer": "过程题答案包含‘十进制 数值’，便于精确核对；不要用近似值代替精确等式。",
+        }
     system = (
         "你是面向没有听课的大学生的中文导师。只依据给定材料和课堂片段，"
         "把知识单元写成可以独立学习的内容。先解释再总结，使用短句和具体动作；"
@@ -1304,6 +1278,7 @@ def generate_study_guide(
         except ValueError as exc:
             dependency_warning = f"先修关系待核验，保留原知识点顺序：{exc}"
     units: list[LearningUnit] = []
+    calculation_conflicts: set[str] = set()
     missing: list[str] = []
     warnings: list[str] = []
     if planning_warning:
@@ -1335,15 +1310,21 @@ def generate_study_guide(
         # student can actually do after studying the unit) instead of leaving
         # inferred units with the generic “解释这一组材料” wording.
         derived_example = _material_example(lesson.profile, raw_material)
+        source_conflict = bool(derived_example and derived_example.get("source_conflict"))
+        if source_conflict:
+            calculation_conflicts.update(page.visual_id for page in unit_pages)
+            warnings.append(f"“{source_unit.title}”的材料标注与精确数值计算不一致，原文与计算过程均已保留，请核对原页。")
         one_sentence = _learner_outcome(
             lesson.profile,
             title,
             _text(source_unit.learner_action, f"学会按“{' → '.join(chain)}”解释并检查“{title}”。"),
             derived_example,
         )
+        if derived_example and derived_example.get("one_sentence"):
+            one_sentence = derived_example["one_sentence"]
         question = _text(
             source_unit.metadata.get("central_question") if isinstance(source_unit.metadata, Mapping) else None,
-            f"“{title}”到底要解决什么问题？",
+            derived_example["question"] if derived_example else f"“{title}”到底要解决什么问题？",
         )
         why = (
             f"这个知识点的作用，是把材料中的信息变成可以检查、可以迁移的判断。"
@@ -1420,6 +1401,11 @@ def generate_study_guide(
             unit, warning = _enrich_with_provider(unit, provider, context)
             if warning:
                 warnings.append(f"{unit.unit_id}: {warning}")
+            if source_conflict:
+                # Keep the checked source/calculation contrast just as we keep
+                # source-derived teacher words. A provider cannot erase it.
+                unit.material_explanation = material
+                unit.worked_examples = [_make_example(source_unit, refs, profile=lesson.profile, material_text=raw_material)]
         # Restore navigation, while missing teaching content remains a draft.
         for example in unit.worked_examples:
             if not example.source_refs:
@@ -1427,8 +1413,10 @@ def generate_study_guide(
         _check_example_completeness(unit)
         _ensure_practice_set(unit, refs)
         issues = _quality_issues(unit)
+        if any("numeric_" in issue for issue in issues):
+            warnings.append(f"“{unit.title}”的数制例题或练习尚未通过精确数值核对；可能存在错误或无法识别的答案写法，保留为草稿。")
         missing.extend(f"{unit.unit_id}.{item}" for item in issues)
-        unit.status = "ready" if provider is not None and not issues and not warning and not (plan and plan.method == "model") else "draft"
+        unit.status = "ready" if provider is not None and not issues and not warning and not source_conflict and not (plan and plan.method == "model") else "draft"
         units.append(unit)
 
     reused = set(repeated_explanations(units))
@@ -1457,6 +1445,11 @@ def generate_study_guide(
                 ref.label = "教师片段待归入讲解"
             ref.status = disposition["status"]
             ref.note = disposition["reason"]
+        if ref.ref in calculation_conflicts:
+            ref.label = "材料计算待核对"
+            ref.status = "pending"
+            ref.verified = False
+            ref.note = "材料标注与位权计算结果冲突；原文与计算过程均已保留，需核对原页或转写。"
     outcomes = plan.outcomes if plan and plan.method == "model" else [item.one_sentence for item in units[:4]]
     chain = plan.spine if plan and plan.method == "model" else [item.title for item in units] if len(units) <= 7 else []
     first_question = units[0].question if units else "这节课要把哪些材料变成可以使用的知识？"
@@ -1515,7 +1508,7 @@ def generate_study_guide(
         pending_segments=pending_segments,
         navigation_segments=navigation_segments,
         speech_role_counts=dict(speech_role_counts),
-        unresolved_items=list(dict.fromkeys([item.visual_id for item in pages if item.status in {"pending", "unresolved"}] + [item.segment_id for item in segments if item.status in {"pending", "unresolved"}] + [ref for ref, item in deferred.items() if item["status"] == "pending"])),
+        unresolved_items=list(dict.fromkeys([item.visual_id for item in pages if item.status in {"pending", "unresolved"} or item.visual_id in calculation_conflicts] + [item.segment_id for item in segments if item.status in {"pending", "unresolved"}] + [ref for ref, item in deferred.items() if item["status"] == "pending"])),
         missing_fields=missing,
         warnings=warnings,
         planning=plan.summary() if plan else {"method": "provided-units", "status": "dependency-error" if dependency_warning else "provided", "unit_count": len(units)},
@@ -1723,6 +1716,7 @@ def render_html(guide: StudyGuide) -> str:
             f"<p class=\"central\">{esc(guide.route.central_question)}</p>",
             "<h3>学完后你应当能够</h3><ul>" + "".join(f"<li>{esc(item)}</li>" for item in guide.route.outcomes) + "</ul>",
             f"<p><strong>学习顺序：</strong>{esc(' → '.join(guide.route.chain)) if guide.route.chain else '学习主线待梳理；以下暂按材料主题展示。'}</p>",
+            f"<p><strong>开始前需会：</strong>{esc('；'.join(guide.route.prerequisites))}</p>" if guide.route.prerequisites else "",
         ]
     )
     for index, unit in enumerate(guide.units, 1):
@@ -1730,6 +1724,7 @@ def render_html(guide: StudyGuide) -> str:
             [
                 f"<article class=\"unit\" id=\"{esc(unit.unit_id)}\"><h2>{index}. {esc(unit.title)}</h2>",
                 f"<p class=\"grip\"><strong>先记住：</strong>{esc(unit.one_sentence)}</p>",
+                f"<p class=\"muted\"><strong>需要先会：</strong>{esc('；'.join(unit.prerequisites))}</p>" if unit.prerequisites else "",
                 f"<section><h3>先想 30 秒</h3><p>{esc(unit.question)}</p><p class=\"muted\">先写下你的猜测，再继续阅读。</p></section>",
                 f"<section><h3>为什么要学</h3><p>{esc(unit.why)}</p></section>",
                 f"<section><h3>材料中看什么</h3><p>{esc(unit.material_explanation)}</p></section>",

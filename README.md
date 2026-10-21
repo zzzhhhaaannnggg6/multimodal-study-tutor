@@ -35,6 +35,11 @@
 重复解题步骤、同题换标签和解析照抄答案等内容也不能通过严格检查；
 这些规则仍不能代替教学正确性评测与学生独立学习验收。
 
+数制转换现按材料中的实际数字使用精确分数计算，展示逐步过程、可作答的变式，
+并保留材料答案与计算结果的冲突。新增 `study evaluate` 和 31 个公开合成案例，
+检查实际答案、练习和来源；范围与运行方式见 [教学正确性评测](docs/evaluation.md)。
+这项评测不能代表整门课程的正确率，也没有替代专家审阅或学生盲测。
+
 这些改动不代表所有课程已经可以完全独立学习。当前内容深度、知识分组和人工验收的边界见
 [质量状态](docs/quality-status.md)。
 
@@ -118,12 +123,16 @@ src/mst/reconstruct.py  # 离线 provenance scaffold
 src/mst/planning.py     # 整课规划、原文锚点、来源覆盖和先修图检查
 src/mst/guide.py        # 面向学生的自学讲义生成、验证和导出
 src/mst/teaching.py     # 空洞例题、重复练习和解释的可观察问题检查
+src/mst/numerals.py     # 有明确条件的位置记数法精确例题
+src/mst/answer_checks.py # 用位权和几何级数核对数值
+src/mst/evaluation.py   # 合成教学案例的实际答案与来源评测
 src/mst/agent.py        # Provider-neutral 查询/解释接口
 src/mst/providers.py    # Mock 与可选 OpenAI provider
 src/mst/cli.py          # study 命令行入口
 web/                    # 本地学生学习路线与闭卷复习
 schemas/                # lesson-map、course-plan 和 study-guide JSON Schema
 examples/               # 可公开的最小 fixture
+evals/                  # 公开合成题库，不含私人课程
 ```
 
 ## 设计边界

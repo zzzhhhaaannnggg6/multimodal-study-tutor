@@ -6,6 +6,9 @@ Before publishing a project or example:
 - [ ] Run `python3 -m pytest -q` when pytest is installed.
 - [ ] Run `study validate ... --strict` on every public lesson map.
 - [ ] Run `study validate-guide ... --strict` on every public student guide.
+- [ ] Run `study evaluate evals/number-conversion-v1.json`; inspect failed cases
+      and retain the report. Treat a pass as bounded numerical evidence, not
+      as expert review or student independent-learning acceptance.
 - [ ] Confirm every core guide unit has a complete worked example with at
       least three steps, a one-condition variation, an error contrast, three
       practice roles (retrieval/process/transfer), and a navigable source

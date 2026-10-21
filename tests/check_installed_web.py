@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 
 from mst.server import create_server, web_directory
+from mst.evaluation import evaluate_suite
 
 assert Path(sys.prefix).resolve() in web_directory().resolve().parents, web_directory()
 with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
@@ -25,3 +26,7 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
         server.server_close()
         thread.join(5)
 print("Installed wheel: HTML, JavaScript and CSS served outside checkout.")
+bank = Path(__file__).resolve().parents[1] / "evals" / "number-conversion-v1.json"
+evaluation = evaluate_suite(bank)
+assert evaluation["failed"] == 0, evaluation
+print(f"Installed wheel: {evaluation['passed']}/{evaluation['total']} supplied synthetic numerical cases passed.")

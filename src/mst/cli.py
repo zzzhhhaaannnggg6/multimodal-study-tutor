@@ -67,6 +67,12 @@ def _parser() -> argparse.ArgumentParser:
     validate_guide.add_argument("map", type=Path)
     validate_guide.add_argument("--strict", action="store_true")
 
+    evaluate = sub.add_parser("evaluate", help="run a local synthetic numerical teaching benchmark")
+    evaluate.add_argument("suite", type=Path)
+    evaluate.add_argument("--guides-dir", type=Path, help="check precomputed case-ID JSON guides instead of generating offline")
+    evaluate.add_argument("--save-guides", type=Path, help="save synthetic candidate guides for inspection")
+    evaluate.add_argument("--output", type=Path, help="save a machine-readable evaluation report")
+
     export = sub.add_parser("export", help="export a Markdown study note")
     export.add_argument("project", type=Path)
     export.add_argument("--output", type=Path)
@@ -90,6 +96,23 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "evaluate":
+        from .evaluation import evaluate_suite
+        from .io import write_json
+
+        try:
+            report = evaluate_suite(args.suite, guides_dir=args.guides_dir, save_guides=args.save_guides)
+        except (OSError, ValueError, KeyError, TypeError, ZeroDivisionError) as exc:
+            print(f"Evaluation suite is invalid: {exc}", file=sys.stderr)
+            return 2
+        if args.output:
+            write_json(args.output, report)
+        print(f"{report['suite_id']}: {report['passed']}/{report['total']} synthetic cases passed; {report['failed']} failed")
+        for result in report["results"]:
+            if not result["passed"]:
+                print(f"FAIL {result['case_id']}: {', '.join(result['failures'])}")
+        print(report["scope"])
+        return 1 if report["failed"] else 0
     if args.command in {"ingest", "build", "generate", "export", "validate"} and getattr(args, "project", None):
         args.project = active_project_dir(args.project)
     if args.command == "init":
