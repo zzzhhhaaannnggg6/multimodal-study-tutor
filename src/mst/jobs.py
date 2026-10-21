@@ -22,6 +22,7 @@ from .io import active_project_dir, project_paths, read_json, write_json
 from .materials import material_results
 from .profiles import PROFILES
 from .reconstruct import build_scaffold
+from .web_models import GenerationOptions, HTTPTextProvider, ModelRequestError, ModelSession
 
 
 ACTIVE = {"queued", "running"}
@@ -70,7 +71,7 @@ def decode_uploads(rows: Any) -> list[tuple[str, bytes]]:
     return decoded
 
 
-def run_pipeline(workspace: Path, progress: Callable[[str, str], None]) -> StudyGuide:
+def run_pipeline(workspace: Path, progress: Callable[[str, str], None], *, provider=None) -> StudyGuide:
     sources = sorted((workspace / "sources" / "uploads").iterdir())
     progress("inventory", "正在清点所选材料")
     manifest = ingest_project(workspace, sources)
@@ -81,7 +82,9 @@ def run_pipeline(workspace: Path, progress: Callable[[str, str], None]) -> Study
             raise ValueError("课件或转写无法打开或解析，请确认文件完整、格式可读后重试。")
         raise ValueError("材料已保存在本机，但没有读到课程文字；请添加教师转写或可提取文字的课件。")
     progress("writing", "正在组织学习讲义")
-    guide = generate_project_guide(workspace)
+    guide = generate_project_guide(workspace, provider)
+    if isinstance(provider, ModelSession) and not provider.checked_units:
+        raise ModelRequestError(provider.failure or "模型未生成通过完整性检查的知识点；原讲义未替换。可改选‘本地草稿’核对材料。")
     identity = {"subject": manifest["subject"], "sources": sorted(row["sha256"] for row in manifest["source_manifest"])}
     guide.lesson_id = manifest.get("web_course_id") or "course::" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     pending_media = [row for row in manifest["source_manifest"] if row["kind"] in {"audio", "video"}]
@@ -103,7 +106,7 @@ def run_pipeline(workspace: Path, progress: Callable[[str, str], None]) -> Study
 
 
 class JobManager:
-    def __init__(self, project: str | Path, runner: Callable = run_pipeline):
+    def __init__(self, project: str | Path, runner: Callable = run_pipeline, *, provider_factory=HTTPTextProvider):
         self.project = Path(project).resolve()
         self.directory = self.project / ".study-jobs"
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -123,6 +126,7 @@ class JobManager:
             self._ownership.close()
             raise ValueError("这个课程已在另一个窗口提供服务，请回到原窗口。") from exc
         self.runner = runner
+        self.provider_factory = provider_factory
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.jobs: dict[str, dict] = {}
@@ -154,10 +158,11 @@ class JobManager:
         with self.lock:
             return self.get(max(self.jobs, key=lambda key: self.jobs[key]["created_at"])) if self.jobs else None
 
-    def submit(self, rows: Any, subject: str = "generic") -> dict:
-        return self._submit(rows, subject)
+    def submit(self, rows: Any, subject: str = "generic", *, generation=None) -> dict:
+        return self._submit(rows, subject, generation=generation)
 
-    def _submit(self, rows: Any, subject: str, *, parent: dict | None = None) -> dict:
+    def _submit(self, rows: Any, subject: str, *, parent: dict | None = None, generation=None) -> dict:
+        options = GenerationOptions.parse(generation)
         if not isinstance(subject, str) or subject not in PROFILES:
             raise ValueError("请选择可用的学科。")
         decoded = decode_uploads(rows)
@@ -173,7 +178,8 @@ class JobManager:
             course_id = parent.get("course_id") if parent else None
             if course_id:
                 manifest["web_course_id"] = course_id
-                write_json(project_paths(workspace)["manifest"], manifest)
+            manifest["generation"] = options.public()
+            write_json(project_paths(workspace)["manifest"], manifest)
             uploads = workspace / "sources" / "uploads"
             uploads.mkdir()
             files = []
@@ -184,16 +190,18 @@ class JobManager:
             record = {"job_id": job_id, "status": "queued", "stage": "queued", "message": "材料已接收，准备开始", "subject": subject,
                       "created_at": _now(), "updated_at": _now(), "files": files, "history": [], "result_status": None,
                       "parent_job_id": parent["job_id"] if parent else None, "course_id": course_id,
+                      "generation": options.public(),
                       "materials": material_results(workspace, files)}
             self.jobs[job_id] = record
             self.events[job_id] = threading.Event()
             self._save(record)
-            worker = threading.Thread(target=self._execute, args=(job_id,), daemon=True, name=f"study-{job_id[:8]}")
+            worker = threading.Thread(target=self._execute, args=(job_id, options), daemon=True, name=f"study-{job_id[:8]}")
             self.workers[job_id] = worker
             worker.start()
             return self.get(job_id)
 
-    def _execute(self, job_id: str) -> None:
+    def _execute(self, job_id: str, options: GenerationOptions) -> None:
+        session = None
         def progress(stage: str, message: str):
             if self.closed.is_set():
                 raise InterruptedError("服务正在关闭，本次生成已中断；材料保留，可以重新生成。")
@@ -207,7 +215,11 @@ class JobManager:
         try:
             progress("preparing", "正在准备独立的课程工作区")
             workspace = self.directory / job_id / "workspace"
-            guide = self.runner(workspace, progress)
+            if options.provider != "none":
+                session = ModelSession(self.provider_factory(options), options, progress)
+                guide = self.runner(workspace, progress, provider=session)
+            else:
+                guide = self.runner(workspace, progress)
             # Check the saved result, not just a successful return from a model.
             saved = read_json(project_paths(workspace)["study_guide"])
             if saved.get("guide_kind") != "student-study-guide":
@@ -222,10 +234,14 @@ class JobManager:
                 if self.closed.is_set():
                     raise InterruptedError("服务已关闭；本次结果保留在任务记录中，尚未替换原讲义。")
                 record = self.jobs[job_id]
+                if session:
+                    record["generation"]["stats"] = session.stats()
                 record["materials"] = material_results(workspace, record["files"])
                 write_json(self.project / ".study-state.json", {"active_run": job_id, "published_at": _now()})
                 record.update(status="succeeded", stage="done", message="学习讲义已生成" if guide.report.status == "complete" else "材料草稿已生成，内容缺口仍需补全",
                               result_status=guide.report.status, course_id=guide.lesson_id, updated_at=_now())
+                if session and guide.report.status != "complete":
+                    record["message"] = "模型讲解已保存，仍有待核验内容" if not session.failure else "部分模型讲解已保存，服务中断的内容仍待补全"
                 try:
                     self._save(record)
                 except OSError:
@@ -235,23 +251,35 @@ class JobManager:
         except Exception as exc:
             with self.lock:
                 record = self.jobs[job_id]
+                if session:
+                    record["generation"]["stats"] = session.stats()
                 record["materials"] = material_results(self.directory / job_id / "workspace", record["files"])
                 message = "课件或转写文件无法打开，请确认文件完整后重新导入。" if isinstance(exc, zipfile.BadZipFile) else str(exc)
+                if options.api_key:
+                    message = message.replace(options.api_key, "[密钥已隐藏]")
                 record.update(status="interrupted" if isinstance(exc, InterruptedError) else "failed", message=message, updated_at=_now())
                 self._save(record)
         finally:
+            if session:
+                try:
+                    session.close()
+                except Exception:
+                    pass  # A provider's cleanup cannot prevent durable job completion.
+            options.api_key = ""
             self.events[job_id].set()
             with self.lock:
                 if self.closed.is_set() and not any(job["status"] in ACTIVE for job in self.jobs.values()):
                     self._ownership.close()
 
-    def retry(self, job_id: str) -> dict:
+    def retry(self, job_id: str, *, generation=None) -> dict:
         record = self.get(job_id)
         if not record or record["status"] not in {"failed", "interrupted"}:
             raise ValueError("只有失败或中断的任务可以重新生成。")
-        return self.revise(job_id, [item["stored_name"] for item in record["files"]], [])
+        if generation is None and record.get("generation", {}).get("provider", "none") != "none":
+            raise ValueError("模型任务重试需要重新选择生成方式并确认发送范围；密钥没有保存。")
+        return self.revise(job_id, [item["stored_name"] for item in record["files"]], [], generation=generation)
 
-    def revise(self, job_id: str, keep: Any, rows: Any) -> dict:
+    def revise(self, job_id: str, keep: Any, rows: Any, *, generation=None) -> dict:
         """Rebuild a saved import without altering its uploads or published guide."""
         record = self.get(job_id)
         if not record or record["status"] not in TERMINAL:
@@ -290,7 +318,7 @@ class JobManager:
             retained.append({"name": known[key]["name"], "data": base64.b64encode(content).decode()})
         if not record.get("course_id") and record["status"] == "succeeded":
             record["course_id"] = read_json(project_paths(uploads.parent.parent)["study_guide"]).get("lesson_id")
-        return self._submit([*retained, *rows], record["subject"], parent=record)
+        return self._submit([*retained, *rows], record["subject"], parent=record, generation=generation)
 
     def active_root(self) -> Path:
         return active_project_dir(self.project)

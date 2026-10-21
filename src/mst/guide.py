@@ -1413,6 +1413,9 @@ def generate_study_guide(
         _check_example_completeness(unit)
         _ensure_practice_set(unit, refs)
         issues = _quality_issues(unit)
+        record_unit = getattr(provider, "record_unit", None)
+        if callable(record_unit):
+            record_unit(usable=not warning and not issues)
         if any("numeric_" in issue for issue in issues):
             warnings.append(f"“{unit.title}”的数制例题或练习尚未通过精确数值核对；可能存在错误或无法识别的答案写法，保留为草稿。")
         missing.extend(f"{unit.unit_id}.{item}" for item in issues)
@@ -1522,7 +1525,7 @@ def generate_study_guide(
         guide_version="1.0",
         guide_kind="student-study-guide",
         lesson_id=lesson.lesson_id,
-        title=_text(lesson.title, f"{PROFILES[lesson.profile].label if lesson.profile in PROFILES else lesson.subject} 自学讲义"),
+        title=_text(lesson.title, plan.title if plan and plan.method == "model" else f"{PROFILES[lesson.profile].label if lesson.profile in PROFILES else lesson.subject} 自学讲义"),
         subject=lesson.subject,
         profile=lesson.profile,
         language="zh-CN",

@@ -81,9 +81,22 @@ available, under `.study-progress/`. Deleting browser storage alone does not
 delete the workspace copies. The default double-click launcher uses
 `local-data/my-study/`. These paths are ignored by Git.
 
-The web generation path never calls a hosted model. Audio-only imports are
-retained but cannot produce a replacement lecture without readable text or a
-transcript. Explicit CLI provider selection remains a separate opt-in action.
+Web generation defaults to local processing. A student can explicitly select
+an OpenAI or compatible text endpoint, inspect selected files and the destination,
+and consent for that submission. Only extracted text, page/time locators and
+necessary teaching context are sent. Pending transcript text is excluded. Raw
+recordings and page images stay local; web text generation does not implicitly
+enable speech or vision models. Audio-only imports still need readable text or a transcript.
+
+Web credentials are held only in the current form and worker memory, never
+serialized in jobs, manifests, exports or browser storage. Submission clears
+the form credential; finishing a job releases the provider reference. Restarting
+does not recover a key or resume network calls. Retry requires a fresh explicit
+choice and consent, or a deliberate switch to local mode. Environment keys are
+not read by the web path. Raw service error bodies are not stored or displayed.
+The adapter never follows redirects, never automatically retries and sets
+`store: false`. That flag does not establish a third party's retention policy
+or guarantee zero data retention. Explicit CLI provider selection remains separate.
 
 Users should be able to delete a local project by removing its source and
 generated workspace directories. Provider-side retention follows that

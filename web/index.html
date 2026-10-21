@@ -43,14 +43,36 @@
 
       <section class="upload-box card" id="uploadBox">
         <details id="materialPanel" open><summary>导入或更换课程材料</summary>
-        <div><h2>导入这节课的材料</h2><p>选择或拖入课件和教师转写。材料只在本机处理；单独的录音会保留，暂不自动转写。</p></div>
+        <div><h2>导入这节课的材料</h2><p>选择或拖入课件和教师转写。默认在本机处理；单独的录音会保留，暂不自动转写。使用模型讲解需要另外选择并确认。</p></div>
         <div id="savedMaterials" class="material-receipt" hidden>
           <h3>这次生成使用的材料</h3><p class="muted">“已读取”只说明提取到了文字，不代表讲义已完整。录音内容、图示含义与待确认的页面配对会单独列出。</p>
           <label class="material-mode">接下来要做什么？<select id="inputMode"><option value="revise">补充或修复这次材料</option><option value="new">开始另一节课</option></select></label>
           <p id="retainHint" class="muted">勾选要继续使用的文件；替换文件时，取消勾选旧文件，再添加新版。未勾选的文件仍保留在上次记录中。</p>
           <ul id="materialResults" class="material-list"></ul>
         </div>
-        <div class="upload-controls"><label>学科 <select id="subject"><option value="generic">通用课程</option><option value="computer-systems">计算机系统</option><option value="mathematics">数学</option><option value="physics">物理</option><option value="history">历史与社会科学</option><option value="biology">生物</option><option value="chemistry">化学</option><option value="law">法学</option><option value="literature">文学</option></select></label><label class="source-picker"><span id="sourcePickerText">添加课件或教师转写（可分次选择）</span><input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /></label><div id="selectedFiles" class="upload-message" aria-live="polite"></div><button class="primary-button" id="generateButton" type="button">生成我的自学讲义</button><button class="secondary-button" id="retryJob" type="button" hidden>用已保存的材料重试</button><span class="upload-message" id="uploadMessage" role="status" aria-live="polite">也可以打开已有讲义。</span><ol id="jobStages" class="job-stages" aria-label="生成进度" hidden></ol></div>
+        <div class="upload-controls">
+          <label>学科 <select id="subject"><option value="generic">通用课程</option><option value="computer-systems">计算机系统</option><option value="mathematics">数学</option><option value="physics">物理</option><option value="history">历史与社会科学</option><option value="biology">生物</option><option value="chemistry">化学</option><option value="law">法学</option><option value="literature">文学</option></select></label>
+          <label class="source-picker">添加课件或教师转写（可分次选择）<input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /></label>
+          <div id="selectedFiles" class="upload-message" aria-live="polite"></div>
+          <fieldset class="generation-settings"><legend>怎样生成这节课？</legend>
+            <label>生成方式<select id="generationMode"><option value="none">本地草稿</option><option value="model">模型讲解</option></select></label>
+            <p class="muted" id="localModeHint">本地草稿可以核对来源，但仍有内容待补，不能当作完整课程。</p>
+            <div id="modelSettings" hidden>
+              <p>先梳理主线，再逐知识点展开解释、例题和练习。调用可能收费，失败后不自动重发。</p>
+              <div class="model-fields">
+                <label>模型服务<select id="modelProvider"><option value="openai">OpenAI</option><option value="compatible">其他兼容服务或本机模型</option></select></label>
+                <label>模型名称<input id="modelName" type="text" value="gpt-5-mini" maxlength="160" autocomplete="off" spellcheck="false" /></label>
+                <label id="baseUrlLabel" hidden>服务基础地址<input id="modelBaseUrl" type="url" placeholder="https://api.example.com/v1" maxlength="500" autocomplete="off" spellcheck="false" /><small>兼容 Chat Completions；本机地址也可使用 HTTP。</small></label>
+                <label>所选服务的 API 密钥<input id="modelApiKey" type="password" autocomplete="off" spellcheck="false" maxlength="4096" /><small>只用于这次生成，不保存。无认证的本机模型可留空。</small></label>
+              </div>
+              <p id="sendDestination" class="send-destination"></p>
+              <details><summary id="sendScopeTitle">查看本次材料</summary><ul id="sendFiles"></ul></details>
+              <p class="muted">只发送本次材料提取的文字、页码、已配对转写及必要教学上下文。录音和页面图像留在本机，不自动转写或读图。</p>
+              <label class="model-consent"><input id="modelConsent" type="checkbox" />我同意将上述文字发送到所选服务，用于本次讲义生成。</label>
+            </div>
+          </fieldset>
+          <button class="primary-button" id="generateButton" type="button">生成我的自学讲义</button><button class="secondary-button" id="retryJob" type="button" hidden>用已保存的材料重试</button><span class="upload-message" id="uploadMessage" role="status" aria-live="polite">也可以打开已有讲义。</span><ol id="jobStages" class="job-stages" aria-label="生成进度" hidden></ol>
+        </div>
         </details>
       </section>
 

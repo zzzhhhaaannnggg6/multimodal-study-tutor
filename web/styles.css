@@ -87,3 +87,16 @@ pre { max-width:100%; overflow-x:auto; white-space:pre; }
 .pending-files button { flex-shrink:0; }
 .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #draftNotice .link-button { text-align:left; }
+.notice { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; align-items:start; }
+.generation-settings { width:100%; min-width:0; margin:10px 0; padding:14px; border:1px solid var(--line); border-radius:8px; }
+.generation-settings legend { color:var(--green); font-weight:700; font-size:15px; }
+.generation-settings label { display:grid; gap:5px; font-size:14px; }
+.generation-settings p, .generation-settings li { font-size:13px; overflow-wrap:anywhere; }
+.upload-box .generation-settings p { font-size:14px; line-height:1.65; }
+.generation-settings small { color:var(--muted); font-size:12px; }
+.generation-settings input:not([type="checkbox"]) { width:100%; min-width:0; padding:9px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:16px; }
+.model-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.generation-settings .model-consent { display:flex; align-items:flex-start; gap:10px; padding:12px 0; }
+.model-consent input { flex-shrink:0; width:20px; height:20px; accent-color:var(--green); }
+.send-destination { padding:10px; background:var(--green-soft); border-radius:6px; }
+@media (max-width:600px) { .model-fields { grid-template-columns:1fr; } }

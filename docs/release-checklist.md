@@ -39,6 +39,8 @@ Before publishing a project or example:
 - [ ] Run `npm test` and `npm run test:web` for desktop and mobile workflows.
 - [ ] Verify corrupt input, concurrent submission and service shutdown preserve the old course.
 - [ ] Verify per-file receipts distinguish unreadable/partial/audio-only input; supplement saved sources and replace one file without overwriting the prior job.
+- [ ] Verify model uploads require per-submission consent, exclude unchecked and pending sources, never persist keys, stop after service errors and never follow redirects.
+- [ ] Verify model planning success alone, empty prose or invalid teaching content cannot replace a saved course; distinguish simulated API checks from live-provider acceptance.
 - [ ] Verify reading and answer drafts restore without browser storage, and changed units invalidate stale progress.
 - [ ] Verify the macOS launcher opens existing work without generating it again.
 - [ ] Tag the release only after the example can run without network access.
