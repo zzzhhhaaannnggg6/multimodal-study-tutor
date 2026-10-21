@@ -1,0 +1,54 @@
+name: macOS desktop preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'src/mst/desktop.py'
+      - 'src/mst/server.py'
+      - 'web/**'
+      - '.github/workflows/desktop-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: Build and check native preview
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: desktop/requirements-build.txt
+      - name: Install isolated build tools
+        run: python -m pip install -r desktop/requirements-build.txt
+      - name: Build bundled application (ad-hoc signed, not notarized)
+        run: python desktop/build_macos.py --output dist/macos-preview
+      - name: Exercise native WKWebView and restart with synthetic course
+        run: python desktop/check_macos.py 'dist/macos-preview/听课助手.app' --output dist/desktop-check
+      - name: Keep verified preview archive and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-local-preview
+          path: |
+            dist/macos-preview/*.zip
+            dist/macos-preview/SHA256SUMS.txt
+            dist/macos-preview/听课助手.app/Contents/Resources/build-info.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Keep synthetic native check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-preview-checks
+          path: |
+            dist/desktop-check/*.json
+            dist/desktop-check/*.png
+          if-no-files-found: ignore
+          retention-days: 14

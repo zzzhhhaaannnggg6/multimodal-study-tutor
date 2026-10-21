@@ -10,7 +10,7 @@
   const units = () => list(state.guide.units);
   const active = () => units()[state.index];
   const done = (unit) => !!state.progress?.units[unit.unit_id]?.completed;
-  let saveTimer, scrollTimer, jobTimer, saving = false, saveAgain = false, restoring = false;
+  let saveTimer, scrollTimer, jobTimer, saveInFlight = null, saveAgain = false, restoring = false;
 
   async function request(path, options = {}) {
     const response = await fetch(path, {cache: "no-store", ...options});
@@ -30,32 +30,37 @@
     clearTimeout(saveTimer);
     if (state.serverSave) saveTimer = setTimeout(saveServer, 500);
   }
-  async function saveServer() {
-    if (!state.serverSave || !state.progress) return;
-    if (saving) { saveAgain = true; return; }
-    saving = true;
-    const key = state.description.key;
-    const snapshot = JSON.stringify(state.progress);
-    try {
-      const result = await post(`api/progress/${key}`, {revision: state.revision, progress: JSON.parse(snapshot)});
-      if (state.description.key === key) {
-        state.revision = result.revision;
-        $("saveStatus").textContent = "阅读位置和练习草稿已保存在本机";
-        if (JSON.stringify(state.progress) !== snapshot) saveAgain = true;
-      }
-    } catch (error) {
-      if (state.description?.key === key) {
-        if ([400,403,409].includes(error.status)) state.serverSave = false;
-        $("saveStatus").textContent = error.status ? `${error.message} 本页草稿仍保留在浏览器。` : "本机服务暂时不可用；记录保留在此浏览器，正在重新连接。";
-        if (!error.status) { clearTimeout(saveTimer); saveTimer = setTimeout(saveServer, 3000); }
-      }
-    } finally {
-      saving = false;
-      if (saveAgain) { saveAgain = false; save(); }
-    }
+  function saveServer() {
+    if (saveInFlight) { saveAgain = true; return saveInFlight; }
+    if (!state.serverSave || !state.progress) return Promise.resolve(!state.progress);
+    saveInFlight = (async () => {
+      do {
+        saveAgain = false;
+        if (!state.serverSave || !state.progress) return false;
+        const key = state.description.key;
+        const snapshot = JSON.stringify(state.progress);
+        try {
+          const result = await post(`api/progress/${key}`, {revision: state.revision, progress: JSON.parse(snapshot)});
+          if (state.description.key === key) {
+            state.revision = result.revision;
+            $("saveStatus").textContent = "阅读位置和练习草稿已保存在本机";
+            if (JSON.stringify(state.progress) !== snapshot) saveAgain = true;
+          }
+        } catch (error) {
+          if (state.description?.key === key) {
+            if ([400,403,409].includes(error.status)) state.serverSave = false;
+            $("saveStatus").textContent = error.status ? `${error.message} 本页草稿仍保留在浏览器。` : "本机服务暂时不可用；记录保留在此浏览器，正在重新连接。";
+            if (!error.status) { clearTimeout(saveTimer); saveTimer = setTimeout(saveServer, 3000); }
+          }
+          return false;
+        }
+      } while (saveAgain);
+      return true;
+    })().finally(() => { saveInFlight = null; });
+    return saveInFlight;
   }
-  function remember() {
-    if (!state.progress || restoring) return;
+  function remember(force = false) {
+    if (!state.progress || (restoring && !force)) return;
     P.visit(state.progress, state.description, state.view, active()?.unit_id, window.scrollY);
     save();
   }
@@ -147,6 +152,7 @@
   async function loadGuide(guide, local = false, keepMaterialsOpen = false) {
     if (guide?.guide_kind !== "student-study-guide" || !Array.isArray(guide.units)) throw new Error("请选择生成的自学讲义文件；原课件请从下方导入。");
     remember();
+    await saveServer();
     const loading = ++state.loading;
     const description = await P.describe(guide);
     let previous, revision = 0, serverSave = false;
@@ -327,7 +333,7 @@
     window.addEventListener("scroll", () => { clearTimeout(scrollTimer); scrollTimer = setTimeout(remember, 250); }, {passive:true});
     window.addEventListener("pagehide", () => {
       remember();
-      if (state.serverSave && state.progress && !saving) {
+      if (state.serverSave && state.progress && !saveInFlight) {
         const body = JSON.stringify({revision: state.revision, progress: state.progress});
         if (body.length < 60000) fetch(`api/progress/${state.description.key}`, {method:"POST", headers:{"Content-Type":"application/json"}, body, keepalive:true}).catch(() => {});
       }
@@ -338,5 +344,18 @@
     try { const result = await request("api/jobs/latest"); if (result.job) await watchJob(result.job, false); }
     catch (_) { /* Opening an exported/static guide needs no job server. */ }
   }
-  boot();
+  // Called only by the native window before closing. Wait for an in-flight
+  // write AND any newer answer, since the next launch uses a different port.
+  window.StudyDesktop = {
+    ready: false,
+    async prepareToClose() {
+      remember(true);
+      clearTimeout(saveTimer);
+      let timeout;
+      const saved = await Promise.race([saveServer(), new Promise((resolve) => { timeout = setTimeout(() => resolve(false), 5000); })]);
+      clearTimeout(timeout);
+      return {saved, busy: state.submitting || ["queued", "running"].includes(state.job?.status)};
+    }
+  };
+  boot().then(() => { window.StudyDesktop.ready = true; });
 })();

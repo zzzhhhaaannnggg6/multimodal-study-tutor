@@ -44,6 +44,60 @@ test("refresh resumes reading, preserves draft and keeps answers folded", async 
   expect(errors).toEqual([]);
 });
 
+test("closing waits for a slow write and the newer answer before reporting saved", async ({page, request}) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  const answer = page.locator("#lessonContent textarea").first();
+  let release, started;
+  const held = new Promise((resolve) => { release = resolve; });
+  const reached = new Promise((resolve) => { started = resolve; });
+  let delayed = false;
+  await page.route("**/api/progress/*", async (route) => {
+    if (route.request().method() === "POST" && !delayed) {
+      delayed = true; started(); await held;
+    }
+    await route.continue();
+  });
+  await answer.fill("先写的答案");
+  await reached;
+  await answer.fill("关窗前刚写的答案 x²\naddi x5, x0, 10");
+  const closing = page.evaluate(() => window.StudyDesktop.prepareToClose());
+  release();
+  expect(await closing).toEqual({saved:true,busy:false});
+  const saved = await (await request.get("/api/jobs/latest")).json();
+  expect(saved.job).toBeNull();
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator("#lessonContent textarea").first()).toHaveValue("关窗前刚写的答案 x²\naddi x5, x0, 10");
+});
+
+test("closing immediately after entering a lesson records the new reading view", async ({page}) => {
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => window.StudyDesktop?.ready)).toBe(true);
+  expect(await page.evaluate(async () => {
+    document.getElementById("startLearning").click();
+    return window.StudyDesktop.prepareToClose();
+  })).toEqual({saved:true,busy:false});
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(page.locator("#learnView")).toBeVisible();
+});
+
+test("close does not claim an answer conflict was saved", async ({page}) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  await page.evaluate(() => window.StudyDesktop.prepareToClose());
+  await page.route("**/api/progress/*", async (route) => {
+    if (route.request().method() === "POST") return route.fulfill({status:409,contentType:"application/json",body:JSON.stringify({error:"另一个页面已更新进度"})});
+    return route.continue();
+  });
+  await page.locator("#lessonContent textarea").first().fill("冲突中的草稿");
+  expect(await page.evaluate(() => window.StudyDesktop.prepareToClose())).toEqual({saved:false,busy:false});
+  await expect(page.locator("#saveStatus")).toContainText("另一个页面");
+});
+
 test("unit completion is reversible and review returns to the lesson", async ({page}) => {
   await page.goto("/");
   await expect(page.locator("#startLearning")).toBeEnabled();

@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import re
+import sys
 import threading
 import webbrowser
 from importlib.metadata import distribution
@@ -17,6 +18,11 @@ from .profiles import PROFILES
 
 
 def web_directory() -> Path:
+    if getattr(sys, "frozen", False):
+        bundled = Path(sys._MEIPASS) / "web"
+        if (bundled / "index.html").is_file():
+            return bundled
+        raise FileNotFoundError("应用的学习页面缺失，请重新下载应用。课程仍保存在本机。")
     checkout = Path(__file__).resolve().parents[2] / "web"
     if (checkout / "index.html").is_file():
         return checkout

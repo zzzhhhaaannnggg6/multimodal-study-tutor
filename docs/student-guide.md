@@ -1,5 +1,8 @@
 # 学生讲义层
 
+使用独立 macOS 应用时，双击即可进入相同的学习页面，不需要 Python 或命令行；
+使用方法、课程保存位置和兼容范围见 [桌面预览](desktop-preview.md)。
+
 `lesson-map.json` 是后台的来源和证据地图，面向开发和验证；`study-guide.json`
 是学生真正阅读的学习层。两者通过 `unit_id`、页面 ID 和时间片段 ID 连接，但学生正文不需要理解这些内部 ID。
 

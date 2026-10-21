@@ -1,0 +1,5 @@
+# Build only. Students receive the bundled interpreter and PDF text reader.
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.9
+pypdf==6.12.2
+certifi==2026.10.19

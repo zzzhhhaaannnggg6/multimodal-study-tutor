@@ -43,4 +43,7 @@ Before publishing a project or example:
 - [ ] Verify model planning success alone, empty prose or invalid teaching content cannot replace a saved course; distinguish simulated API checks from live-provider acceptance.
 - [ ] Verify reading and answer drafts restore without browser storage, and changed units invalidate stale progress.
 - [ ] Verify the macOS launcher opens existing work without generating it again.
+- [ ] Build the native desktop preview in an isolated environment; verify the archive, ad-hoc signature, declared minimum OS and third-party notices.
+- [ ] Run the native WKWebView synthetic check without developer Python in the application PATH; move the app and verify course, answer and completion restoration, TLS roots and no orphan backend.
+- [ ] Manually check native file selection, download Save panel, quit during generation, downloaded-archive Gatekeeper behavior and each advertised OS/architecture. Do not treat ad-hoc signing as notarization.
 - [ ] Tag the release only after the example can run without network access.

@@ -80,6 +80,10 @@ positions are stored in browser local storage and, when the local service is
 available, under `.study-progress/`. Deleting browser storage alone does not
 delete the workspace copies. The default double-click launcher uses
 `local-data/my-study/`. These paths are ignored by Git.
+The native macOS preview instead uses the system Application Support directory
+named `Multimodal Study Tutor`, outside the application bundle and repository.
+Moving or replacing the app preserves those files; removing the app does not
+delete course data. The File menu opens that folder. See [desktop preview](desktop-preview.md).
 
 Web generation defaults to local processing. A student can explicitly select
 an OpenAI or compatible text endpoint, inspect selected files and the destination,
