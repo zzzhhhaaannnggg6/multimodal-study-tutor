@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .answer_checks import BASES as _BASES, LITERAL as _LITERAL, answer_values as _answer_values, reference_value
+from .binary_checks import binary_values, question_matches, read_columns, reference_columns
 from .guide import StudyGuide, generate_study_guide
 from .models import KnowledgeUnit, LessonMap, VisualFrame
 
@@ -34,9 +35,22 @@ def load_suite(value: dict[str, Any] | str | Path) -> dict[str, Any]:
         seen.add(case["case_id"])
         if case.get("mode") not in {"solve", "conflict", "abstain"} or not isinstance(case.get("source_text"), str) or not case["source_text"].strip():
             raise ValueError("Evaluation case needs source text and a supported expectation.")
+        if case.get("task", "positional-conversion") not in {"positional-conversion", "binary-arithmetic"}:
+            raise ValueError("Unsupported evaluation task.")
         if case.get("forbidden") is not None and (not isinstance(case["forbidden"], list) or any(not isinstance(item, str) for item in case["forbidden"])):
             raise ValueError("Forbidden output fragments must be strings.")
         if case["mode"] != "abstain":
+            if case.get("task") == "binary-arithmetic":
+                if case.get("operator") not in {"+", "-"} or any(not isinstance(case.get(key), str) or not re.fullmatch(r"[01]{1,17}", case[key]) for key in ("left", "right", "result")):
+                    raise ValueError("Invalid binary arithmetic expectation.")
+                a, b, result = (int(case[key], 2) for key in ("left", "right", "result"))
+                if result != (a + b if case["operator"] == "+" else a - b):
+                    raise ValueError("Golden arithmetic operands and result disagree.")
+                if case["mode"] == "solve" and (not isinstance(case.get("transfer"), str) or not re.fullmatch(r"[01]{1,18}", case["transfer"]) or int(case["transfer"], 2) != result + 1):
+                    raise ValueError("Golden arithmetic transfer result disagrees.")
+                if case["mode"] == "conflict" and (not isinstance(case.get("supplied_answer"), str) or not re.fullmatch(r"[01]{1,17}", case["supplied_answer"]) or int(case["supplied_answer"], 2) == result):
+                    raise ValueError("An arithmetic conflict needs a different supplied answer.")
+                continue
             source = reference_value(case["source"], case["source_base"])
             target = reference_value(case["target"], case["target_base"])
             if source != target:
@@ -50,9 +64,63 @@ def load_suite(value: dict[str, Any] | str | Path) -> dict[str, Any]:
 
 def case_map(case: dict[str, Any]) -> LessonMap:
     ref = f"eval::{case['case_id']}::p001"
-    return LessonMap(lesson_id=f"eval::{case['case_id']}", title="合成数制评测", subject="computer-systems", profile="computer-systems",
-                     pages=[VisualFrame(visual_id=ref, page=1, title="进制转换", text=case["source_text"], status="covered")],
-                     units=[KnowledgeUnit(unit_id=f"eval::{case['case_id']}::unit", title="进制转换", visual_ids=[ref], understanding_level="U2")])
+    title = "二进制加减法" if case.get("task") == "binary-arithmetic" else "进制转换"
+    return LessonMap(lesson_id=f"eval::{case['case_id']}", title="合成数值评测", subject="computer-systems", profile="computer-systems",
+                     pages=[VisualFrame(visual_id=ref, page=1, title=title, text=case["source_text"], status="covered")],
+                     units=[KnowledgeUnit(unit_id=f"eval::{case['case_id']}::unit", title=title, visual_ids=[ref], understanding_level="U2")])
+
+
+def _evaluate_binary(case: dict[str, Any], guide: StudyGuide, example: Any) -> list[str]:
+    """Fixed gold plus whole-integer prefix checks, independent of recurrence."""
+    failures = []
+    op, left, right = case["operator"], case["left"], case["right"]
+    value = int(case["result"], 2)
+    if not question_matches(example.question, left, right, op):
+        failures.append("source.problem_changed")
+    if read_columns(example.steps, op) != reference_columns(left, right, op):
+        failures.append("example.columns_incorrect")
+    values = binary_values(example.answer)
+    if case["mode"] == "conflict":
+        ref = f"eval::{case['case_id']}::p001"
+        if example.complete or "【待确认】" not in example.answer or values != [value, int(case["supplied_answer"], 2)] or ref not in guide.report.unresolved_items or guide.report.status == "complete":
+            failures.append("source.conflict_not_preserved")
+        return failures
+    if not example.complete or values != [value]:
+        failures.append("answer.incorrect_or_incomplete")
+    a_variant = format(int(left, 2) + 1, "b").zfill(len(left))
+    variation = list(_LITERAL.finditer(example.variation))
+    if (len(variation) != 3 or [(m["digits"], m["base"]) for m in variation[:2]] != [(a_variant, "₂"), (right, "₂")]
+            or binary_values(variation[-1][0]) != [value + 1]
+            or example.variation[variation[0].end():variation[1].start()].strip() != op):
+        failures.append("variation.incorrect")
+    practices = [item for unit in guide.units for item in unit.practice_items]
+    expected = reference_columns(left, right, op)
+    chosen = next((c for c in expected if c[-1] and c[3]), next((c for c in expected if c[-1]), expected[0]))
+    for kind in ("retrieval", "process", "transfer"):
+        items = [item for item in practices if item.kind == kind]
+        if len(items) != 1:
+            failures.append(f"{kind}.missing_or_duplicate")
+            continue
+        item = items[0]
+        if kind == "transfer":
+            if not question_matches(item.prompt, a_variant, right, op) or binary_values(item.answer) != [int(case["transfer"], 2)]:
+                failures.append("transfer.incorrect")
+            if read_columns([item.explanation], op) != reference_columns(a_variant, right, op):
+                failures.append("transfer.process_incorrect")
+        elif kind == "process":
+            name = "进位" if op == "+" else "借位"
+            given = re.search(r"第\s*(\d+)\s*位读到\s*([01])\s*和\s*([01])，来自右侧的" + name + r"是\s*([01])", item.prompt)
+            if (not question_matches(item.prompt, left, right, op) or given is None or tuple(int(given[i]) for i in (1, 2, 3, 4)) != chosen[:4]
+                    or re.findall(r"本位\s*=\s*([01])", item.answer) != [str(chosen[-2])] or re.findall(name + r"\s*=\s*([01])", item.answer) != [str(chosen[-1])]):
+                failures.append("process.incorrect")
+            if read_columns([item.explanation], op) != [chosen]:
+                failures.append("process.explanation_incorrect")
+        elif op == "+":
+            if re.findall(r"本位\s*=\s*([01])", item.answer) != ["0"] or re.findall(r"进位\s*=\s*([01])", item.answer) != ["1"]:
+                failures.append("retrieval.incorrect")
+        elif not re.search(r"当前位的\s*2", item.answer):
+            failures.append("retrieval.incorrect")
+    return failures
 
 
 def evaluate_case(case: dict[str, Any], guide: StudyGuide) -> dict[str, Any]:
@@ -80,6 +148,10 @@ def evaluate_case(case: dict[str, Any], guide: StudyGuide) -> dict[str, Any]:
             failures.append("unsupported.claims_complete")
     elif examples:
         example = examples[0]
+        if case.get("task") == "binary-arithmetic":
+            failures.extend(_evaluate_binary(case, guide, example))
+            return {"case_id": case["case_id"], "mode": case["mode"], "passed": not failures, "failures": failures,
+                    "guide_fingerprint": hashlib.sha256(guide.to_json().encode()).hexdigest()}
         expected = reference_value(case["target"], case["target_base"])
         values = _answer_values(example.answer, case["target_base"])
         question_literals = [(row["digits"].upper(), _BASES[row["base"]]) for row in _LITERAL.finditer(example.question)]
@@ -129,5 +201,5 @@ def evaluate_suite(value: dict[str, Any] | str | Path, *, guides_dir: str | Path
     return {"report_version": "1.0", "suite_id": suite["suite_id"],
             "suite_fingerprint": hashlib.sha256(json.dumps(suite, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
             "candidate": "precomputed-guides" if guides_dir is not None else "offline-generator",
-            "scope": "Synthetic numerical results, transfer answers and source boundaries only. Not expert review, student testing or general teaching verification.",
+            "scope": "Synthetic numerical results, binary column work, transfer answers and source boundaries only. Not expert review, student testing or general teaching verification.",
             "total": len(results), "passed": passed, "failed": len(results) - passed, "results": results}

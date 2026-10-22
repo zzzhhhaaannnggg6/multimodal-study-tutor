@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-audio-") as directory:
     assert len({row["segment_id"] for row in rows}) == 2
     assert len({row["source_id"] for row in rows}) == 2
 print("Installed wheel: both recordings retained; repeat and scaffold rebuild made no additional speech calls.")
-for name in ("number-conversion-v1.json", "number-notation-v1.json"):
+for name in ("number-conversion-v1.json", "number-notation-v1.json", "binary-arithmetic-v1.json"):
     bank = Path(__file__).resolve().parents[1] / "evals" / name
     evaluation = evaluate_suite(bank)
     assert evaluation["failed"] == 0, evaluation

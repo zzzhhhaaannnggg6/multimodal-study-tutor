@@ -47,6 +47,7 @@ assert(!document.querySelector('#routeCards .unit-card'), 'new isolated workspac
 const files = new DataTransfer();
 files.items.add(new File(['# 二进制转十进制\\n将二进制 (1101)2 转换为十进制，按位权展开计算。'], '合成课程.md', {type:'text/markdown'}));
 files.items.add(new File([Uint8Array.from(atob(PDF_BYTES), c=>c.charCodeAt(0))], '合成页面.pdf', {type:'application/pdf'}));
+files.items.add(new File(['# 二进制减法\\nBinary subtraction: 10000-00001'], '合成借位.md', {type:'text/markdown'}));
 $('sourceFiles').files=files.files;
 $('sourceFiles').dispatchEvent(new Event('change', {bubbles:true}));
 $('subject').value='computer-systems';
@@ -54,7 +55,7 @@ $('generateButton').click();
 await wait(()=> document.querySelector('#routeCards .unit-card') && $('uploadMessage').textContent.includes('草稿已生成'));
 const job=(await(await fetch('api/jobs/latest')).json()).job;
 assert(job.status==='succeeded', 'generation did not succeed');
-assert(job.materials.length===2, 'missing per-file receipts');
+assert(job.materials.length===3, 'missing per-file receipts');
 assert(job.materials.find(x=>x.name.endsWith('.pdf')).status !== 'unreadable', 'PDF must work without system pdftotext');
 const guide=await(await fetch('study-guide.json')).json();
 const numeric=guide.units[0];
@@ -72,6 +73,14 @@ assert(pageImage, 'source page missing beside explanation');
 pageImage.scrollIntoView();
 await wait(()=>pageImage.complete && pageImage.naturalWidth>0);
 assert(pageImage.naturalWidth>500, 'PDF preview is not a full page');
+const borrowIndex=guide.units.findIndex(unit=>unit.worked_examples.some(example=>example.answer.includes('(01111)₂')));
+assert(borrowIndex>=0, 'bundled binary arithmetic lesson is missing');
+document.querySelector('#routeCards [data-unit="'+borrowIndex+'"]').click();
+assert(document.querySelector('#lessonContent .example').textContent.includes('0 - 1 - 借位 0 = -1'), 'native view must show actual borrowing');
+assert(document.querySelectorAll('#lessonContent .practice').length===3, 'binary lesson needs three concrete exercises');
+assert(!document.querySelector('#lessonContent .practice details[open]'), 'binary answers must start folded');
+assert(guide.units[borrowIndex].practice_items.find(item=>item.kind==='process').prompt.includes('右侧的借位是 1'), 'process exercise must test the borrow from the preceding column');
+assert(guide.units[borrowIndex].practice_items.find(item=>item.kind==='transfer').answer==='(10000)₂', 'binary variant must have a checked answer');
 for(const format of ['html','md','json']) {
   const response=await fetch('api/exports/'+format);
   const content=await response.text();
@@ -90,7 +99,7 @@ answer.dispatchEvent(new Event('input', {bubbles:true}));
 $('markUnit').click();
 const closing=await window.StudyDesktop.prepareToClose();
 assert(closing.saved && !closing.busy, 'close did not flush the newest answer');
-return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
+return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, binary_borrowing:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
 """
 
 SECOND = """

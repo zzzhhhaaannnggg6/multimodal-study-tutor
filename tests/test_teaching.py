@@ -40,6 +40,8 @@ def test_repeated_or_generic_steps_cannot_make_a_complete_example(steps):
     (lambda data: data["misconceptions"][0].update(correct=data["misconceptions"][0]["wrong"]), "misconceptions.identical_contrast"),
     (lambda data: data.update(tutor_bridge=data["material_explanation"]), "tutor_bridge.repeats_material"),
     (lambda data: data.update(step_chain=["确定材料中的起因"] * 3), "step_chain.repeated"),
+    (lambda data: data["practice_items"][1].update(prompt="请按正确顺序写出完成这个知识点时要检查的步骤。"), "practice_items.generic_prompt"),
+    (lambda data: data["practice_items"][2].update(answer="先定位被改变的条件，再沿步骤检查它影响的中间过程和最终结果。"), "practice_items.generic_answer"),
 ])
 def test_complete_fields_still_fail_when_they_do_not_teach(mutation, issue):
     class HollowTeaching(CompleteProvider):

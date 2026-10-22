@@ -35,6 +35,16 @@ def teaching_issues(unit: Any) -> list[str]:
         issues.append("practice_items.repeated_prompts")
     for item in unit.practice_items:
         answer, explanation = normalized(item.answer), normalized(item.explanation)
+        if normalized(item.prompt) in {normalized(text) for text in (
+            "请按正确顺序写出完成这个知识点时要检查的步骤。",
+            "只改变一个条件后，哪一步需要重新检查？为什么？",
+        )}:
+            issues.append("practice_items.generic_prompt")
+        if answer in {normalized(text) for text in (
+            "先定位被改变的条件，再沿步骤检查它影响的中间过程和最终结果。",
+            "能够解释这一部分的对象、关系和成立条件。",
+        )}:
+            issues.append("practice_items.generic_answer")
         if answer and answer == normalized(item.prompt):
             issues.append("practice_items.answer_repeats_question")
         if answer and answer == explanation:

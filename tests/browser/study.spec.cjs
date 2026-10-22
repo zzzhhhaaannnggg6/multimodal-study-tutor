@@ -274,6 +274,40 @@ test("a mathematics student gets the original negative-number explanation and ca
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
 });
 
+test("a student can follow borrowing, solve a concrete variant and resume with answers folded", async ({page}, testInfo) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  await page.locator("#subject").selectOption("computer-systems");
+  await page.locator("#sourceFiles").setInputFiles({name:"借位.md", mimeType:"text/markdown", buffer:Buffer.from("# 二进制减法\nBinary subtraction: 10000-00001")});
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
+  await page.locator("#startLearning").click();
+  const example = page.locator("#lessonContent .example");
+  await expect(example).toContainText("(01111)₂");
+  await expect(example).toContainText("0 - 1 - 借位 0 = -1");
+  await expect(example).toContainText("借来的 1 相当于本列的 2");
+  expect(await example.locator("ol li").count()).toBeGreaterThanOrEqual(7);
+  await example.screenshot({path:testInfo.outputPath("binary-borrow-example.png")});
+  await expect(page.locator("#lessonContent .practice")).toHaveCount(3);
+  await expect(page.locator("#lessonContent .practice details[open]")).toHaveCount(0);
+  const process = page.locator("#lessonContent .practice").nth(1);
+  await process.locator("textarea").fill("本位=1；借位=1。");
+  await process.locator("summary").click();
+  await expect(process).toContainText("本位=1；借位=1");
+  const variant = page.locator("#lessonContent .practice").last();
+  await expect(variant).toContainText("(10001)₂ - (00001)₂");
+  await variant.locator("textarea").fill("10000，重新计算后借位链消失。");
+  await variant.locator("summary").click();
+  await expect(variant).toContainText("(10000)₂");
+  await expect(page.locator("#saveStatus")).toContainText("已保存在本机");
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+  await page.reload();
+  await expect(page.locator("#lessonContent .practice").last().locator("textarea")).toHaveValue("10000，重新计算后借位链消失。");
+  await expect(page.locator("#lessonContent .practice details[open]")).toHaveCount(0);
+  await expect(page.locator("#progressText")).toContainText("0/1");
+});
+
 test("unexplained materials stay readable without mock exercises or completion", async ({page, request}, testInfo) => {
   await page.goto("/");
   await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");

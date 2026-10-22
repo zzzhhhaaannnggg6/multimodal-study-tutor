@@ -23,6 +23,8 @@ from .io import active_project_dir, project_paths, read_json, write_json
 from .models import Claim, Evidence, KnowledgeUnit, LessonMap, SpeechSegment, VisualFrame, coerce_lesson_map
 from .profiles import PROFILES
 from .numerals import number_example
+from .binary_arithmetic import binary_example
+from .binary_checks import binary_issues
 from .answer_checks import BASES, LITERAL, answer_values
 from .planning import offline_course, order_units, propose_course
 from .teaching import repeated_explanations, specific_steps, teaching_issues
@@ -302,6 +304,9 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
     conversion = number_example(text)
     if conversion:
         return conversion
+    arithmetic = binary_example(text)
+    if arithmetic:
+        return arithmetic
     if profile != "computer-systems":
         return None
     instructions = [(_text(row["opcode"]).lower(), tuple(_text(op).lower() for op in row["operands"])) for row in visual_signals(text)["code_candidates"]]
@@ -407,31 +412,6 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
             ],
             "answer": "每一层都把上一层的意图变成自己能处理的对象；ISA 是软件和硬件之间的稳定接口。",
             "variation": "如果只更换内部数据通路而保持 ISA 不变，上层程序的写法可以保持不变，这正是接口分层的价值。",
-        }
-    unsigned_context = not re.search(r"补码|反码|原码|two.s complement|\bsigned\b|有符号", compact, re.I)
-    if "01100" in compact and "10001" in compact and "multiple bit binary addition" in compact.lower() and unsigned_context:
-        return {
-            "question": "计算二进制加法 `01100₂ + 10001₂`，并说明进位如何处理。",
-            "setup": "从最低位向最高位逐列相加；最低位的 carry-in 为 0。",
-            "steps": [
-                "最低位开始逐列相加，每一列都把上一列的进位带入。",
-                "出现 2 或 3 时写下当前位，并把进位传给左侧；不要把进位丢掉。",
-                "最后检查结果的位数和十进制值是否与 12+17=29 一致。",
-            ],
-            "answer": "结果为 `11101₂`（十进制 29）；验证时要同时检查每一列的和与进位。",
-            "variation": "若最低位 carry-in 改为 1，相当于结果再加 1，需要重新处理从最低位开始的进位链。",
-        }
-    if "10110" in compact and "10010" in compact and "minuend" in compact.lower() and unsigned_context:
-        return {
-            "question": "计算二进制减法 `10110₂ - 10010₂`，并检查借位。",
-            "setup": "从最低位向最高位逐列相减；需要借位时，把借位传给左侧。",
-            "steps": [
-                "先对齐两个数，最低位的 borrow-in 为 0。",
-                "逐列计算，被减位不足时从左侧借 1，并记录借位。",
-                "得到 `00100₂`，再用十进制 22-18=4 检查结果。",
-            ],
-            "answer": "`10110₂ - 10010₂ = 00100₂`。",
-            "variation": "如果减数大于被减数，先判断结果为负，再按材料要求交换并在结果前标记负号。",
         }
     if ("2 10 (1024)" in compact and "2 20" in compact) or ("2^{10}" in compact and "2^{20}" in compact):
         return {
@@ -1018,59 +998,6 @@ def _make_misconceptions(unit: KnowledgeUnit, *, profile: str = "generic") -> li
     ]
 
 
-def _make_practice_items(
-    unit: KnowledgeUnit | LearningUnit,
-    refs: list[GuideSourceRef],
-    *,
-    profile: str = "generic",
-) -> list[PracticeItem]:
-    """Provide retrieval, process and transfer practice in that order."""
-
-    raw_chain = getattr(unit, "logic_chain", None) or getattr(unit, "step_chain", None)
-    chain = _profile_chain(profile, _split_chain(raw_chain))
-    action = _text(
-        getattr(unit, "learner_action", None) or getattr(unit, "one_sentence", None),
-        f"说明“{unit.title}”的核心对象、过程和结果。",
-    )
-    chain_text = " → ".join(chain)
-    rows = [
-        PracticeItem(
-            practice_id=f"{unit.unit_id}::practice-01",
-            prompt=f"合上材料，用一句话说明“{unit.title}”要解决什么问题。",
-            kind="retrieval",
-            difficulty="基础",
-            answer=action,
-            explanation="先说清楚对象和要解决的问题；不要只复述标题。",
-            unit_id=unit.unit_id,
-            source_refs=refs,
-        ),
-        PracticeItem(
-            practice_id=f"{unit.unit_id}::practice-02",
-            prompt="请按正确顺序写出完成这个知识点时要检查的步骤。",
-            kind="process",
-            difficulty="过程",
-            answer=chain_text,
-            explanation="检查重点是顺序和每一步的作用；如果只能写出最后结论，说明中间链条还没有掌握。",
-            unit_id=unit.unit_id,
-            source_refs=refs,
-        ),
-        PracticeItem(
-            practice_id=f"{unit.unit_id}::practice-03",
-            prompt=_text(
-                getattr(unit, "transfer_question", None),
-                "只改变一个条件后，哪一步需要重新检查？为什么？",
-            ),
-            kind="transfer",
-            difficulty="迁移",
-            answer="先定位被改变的条件，再沿步骤检查它影响的中间过程和最终结果。",
-            explanation="迁移题不要求背原题答案，而要求找出条件变化会经过哪一条关系影响结论。",
-            unit_id=unit.unit_id,
-            source_refs=refs,
-        ),
-    ]
-    return rows
-
-
 def _ensure_practice_set(unit: LearningUnit, refs: list[GuideSourceRef]) -> None:
     """Attach navigation without padding missing teaching roles."""
 
@@ -1164,7 +1091,7 @@ def _quality_issues(unit: LearningUnit) -> list[str]:
         issues.append("practice_roles")
     if not unit.misconceptions:
         issues.append("misconceptions")
-    return list(dict.fromkeys([*issues, *teaching_issues(unit), *_numerical_issues(unit)]))
+    return list(dict.fromkeys([*issues, *teaching_issues(unit), *_numerical_issues(unit), *binary_issues(unit)]))
 
 
 def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tuple[LearningUnit, str | None]:
@@ -1187,6 +1114,12 @@ def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tu
             "preserve": "保留例题的原数、进制和已有过程题/迁移题的条件；补充解释时不能换成另一道题。",
             "notation": "例题和迁移题答案用 (数字)₂、(数字)₈、(数字)₁₀ 或 (数字)₁₆；循环小数的循环节放在括号里。",
             "process_answer": "过程题答案包含‘十进制 数值’，便于精确核对；不要用近似值代替精确等式。",
+        }
+    if binary_example("\n".join(ref.quote or "" for ref in unit.source_refs if ref.kind == "material")):
+        prompt["binary_arithmetic_contract"] = {
+            "preserve": "保留原例题的两个操作数、运算符和三道已定练习的题干；可以扩充解释，不能替换题目条件。",
+            "columns": "保留已有逐列计算行的格式与数值，用于独立核对本位、进借位和中间运算；可以在行后补充解释。",
+            "answers": "结果使用 (数字)₂；过程题保留‘本位=0/1；进位/借位=0/1’，基础题保留已有答案。",
         }
     system = (
         "你是面向没有听课的大学生的中文导师。只依据给定材料和课堂片段，"
@@ -1357,7 +1290,9 @@ def generate_study_guide(
             prerequisites = _dedupe([*prerequisites, *derived_example.get("prerequisites", [])])
             if derived_example.get("misconceptions"):
                 misconceptions = [Misconception.from_dict(item) for item in derived_example["misconceptions"]]
-        practice = _make_practice_items(source_unit, refs, profile=lesson.profile)
+        # An exercise needs a real question and answer; generic instructions
+        # to recall a title or "change one condition" are not student practice.
+        practice = []
         if derived_example and derived_example.get("practice"):
             practice = [PracticeItem(practice_id=f"{source_unit.unit_id}::practice-{index:02d}", unit_id=source_unit.unit_id, source_refs=refs, **item)
                         for index, item in enumerate(derived_example["practice"], 1)]
@@ -1444,6 +1379,8 @@ def generate_study_guide(
             record_unit(usable=not warning and not issues)
         if any("numeric_" in issue for issue in issues):
             warnings.append(f"“{unit.title}”的数制例题或练习尚未通过精确数值核对；可能存在错误或无法识别的答案写法，保留为草稿。")
+        if any("binary_" in issue for issue in issues):
+            warnings.append(f"“{unit.title}”的二进制运算、逐列过程或练习条件尚未通过核对；可能有错误或无法识别的写法，保留为草稿。")
         missing.extend(f"{unit.unit_id}.{item}" for item in issues)
         unit.status = "ready" if provider is not None and not issues and not warning and not source_conflict and not (plan and plan.method == "model") else "draft"
         units.append(unit)

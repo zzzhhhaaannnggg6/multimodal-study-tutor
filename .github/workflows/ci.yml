@@ -89,6 +89,7 @@ jobs:
         run: |
           python -m mst.cli evaluate evals/number-conversion-v1.json --output /tmp/mst-numerical-evaluation.json
           python -m mst.cli evaluate evals/number-notation-v1.json --output /tmp/mst-notation-evaluation.json
+          python -m mst.cli evaluate evals/binary-arithmetic-v1.json --output /tmp/mst-binary-evaluation.json
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -97,6 +98,7 @@ jobs:
           path: |
             /tmp/mst-numerical-evaluation.json
             /tmp/mst-notation-evaluation.json
+            /tmp/mst-binary-evaluation.json
           if-no-files-found: ignore
           retention-days: 14
 
