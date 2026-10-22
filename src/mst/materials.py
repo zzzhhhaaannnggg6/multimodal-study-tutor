@@ -43,7 +43,7 @@ def material_results(workspace: Path, files: list[dict]) -> list[dict]:
             status, label, detail, action = "pending", "尚未读取", "文件已保存在本机，尚无可用的读取结果。", "等待处理；若任务已中断，可用保存的材料重试。"
         elif issue:
             status, label, detail, action = "unreadable", "无法读取", "这份文件未进入课程讲解。", "取消勾选此文件，再添加可打开的副本；旧版课件请另存为 PPTX 或 PDF。"
-        elif source.get("kind") in {"audio", "video"}:
+        elif source.get("kind") in {"audio", "video"} and not speech:
             status, label, detail, action = "transcription-needed", "录音尚未转写", "本次只保存文件，没有读取其中的讲课内容。", "添加这段录音对应的教师转写（优先 SRT/VTT；也可用 DOCX/TXT）。"
         elif pages:
             status = "text-read" if text_pages == len(pages) else "partial" if text_pages else "no-text"

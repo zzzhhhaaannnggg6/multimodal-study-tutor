@@ -13,6 +13,9 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Protocol
 
+from .speech import (DEFAULT_SPEECH_MODEL, MAX_SPEECH_BYTES, SpeechRequestError,
+                     transcription_request_options, transcription_response)
+
 
 class TextModelProvider(Protocol):
     name: str
@@ -105,43 +108,63 @@ class OpenAISpeechProvider:
 
     name = "openai-speech"
 
-    def __init__(self, model: str = "gpt-4o-transcribe", client: Any | None = None) -> None:
+    def __init__(self, model: str = DEFAULT_SPEECH_MODEL, client: Any | None = None) -> None:
         self.model = model
         self._client = client
+        self._owns_client = client is None
+
+    def close(self) -> None:
+        if self._owns_client and self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def validate_audio(self, audio_path: str) -> None:
+        path = Path(audio_path)
+        if path.suffix.lower() not in {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}:
+            raise SpeechRequestError("这份录音格式暂不支持转写；请另存为 MP3、M4A 或 WAV，或添加 SRT/VTT 转写。")
+        size = path.stat().st_size
+        if not size:
+            raise SpeechRequestError("录音文件为空，请检查文件或添加教师转写；本次未上传。")
+        if size > MAX_SPEECH_BYTES:
+            raise SpeechRequestError("本工具当前每段录音转写上限为 24 MB；请压缩或分段后重新导入，也可添加 SRT/VTT。整批尚未上传。")
 
     @property
     def client(self) -> Any:
         if self._client is None:
             try:
-                from openai import OpenAI
+                from openai import DefaultHttpxClient, OpenAI
             except ImportError as exc:  # pragma: no cover - optional dependency
-                raise RuntimeError(
+                raise SpeechRequestError(
                     "OpenAI support is optional; install multimodal-study-tutor[openai]"
                 ) from exc
-            self._client = OpenAI()
+            # Retrying an upload may incur another charge. Redirects must not
+            # send teacher recordings to a destination the user did not select.
+            self._client = OpenAI(max_retries=0, timeout=180, http_client=DefaultHttpxClient(follow_redirects=False))
         return self._client
 
     def transcribe(self, audio_path: str) -> list[dict[str, Any]]:
+        self.validate_audio(audio_path)
         with open(audio_path, "rb") as handle:
-            response = self.client.audio.transcriptions.create(
-                model=self.model,
-                file=handle,
-                response_format="verbose_json",
-                timestamp_granularities=["segment"],
-            )
-        segments = getattr(response, "segments", None)
-        if segments:
-            rows: list[dict[str, Any]] = []
-            for index, segment in enumerate(segments, 1):
-                if isinstance(segment, dict):
-                    row = dict(segment)
-                else:
-                    row = {"start": getattr(segment, "start", None), "end": getattr(segment, "end", None), "text": getattr(segment, "text", "")}
-                row.setdefault("segment_id", f"speech::{index:04d}")
-                rows.append(row)
-            return rows
-        text = getattr(response, "text", "")
-        return [{"segment_id": "speech::0001", "text": str(text), "status": "unresolved"}]
+            try:
+                response = self.client.audio.transcriptions.create(
+                    model=self.model, file=handle, **transcription_request_options(self.model))
+            except SpeechRequestError:
+                raise
+            except Exception as exc:
+                code = getattr(exc, "status_code", None)
+                if not isinstance(code, int):
+                    code = None
+                messages = {400: "所选模型不接受当前转写参数或录音格式；请核对模型，也可添加 SRT/VTT 转写。",
+                            401: "转写密钥无效或已失效，请检查 OPENAI_API_KEY。",
+                            403: "该密钥没有调用所选转写模型的权限。",
+                            404: "未找到所选转写模型或接口，请核对模型名称。",
+                            413: "转写服务拒绝了这段录音的大小，请压缩或分段后重新导入。",
+                            429: "转写服务限额或余额不足；已停止请求，请检查账户后重试。"}
+                raise SpeechRequestError(messages.get(code, "转写服务未成功返回；请检查网络、模型和密钥后重试。本次没有自动重发录音。")) from None
+        try:
+            return transcription_response(response)
+        except ValueError as exc:
+            raise SpeechRequestError(str(exc)) from None
 
 
 class OpenAIVisionProvider:

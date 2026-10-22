@@ -371,3 +371,52 @@ def test_generate_cli_reuses_transcription_and_forwards_explicit_refresh(tmp_pat
     assert "Added 0 audio segment(s)" in capsys.readouterr().out
     assert main([*args, "--refresh-transcription"]) == 0
     assert len(provider.calls) == 4
+
+
+def test_adapter_preflight_rejects_later_recording_before_any_upload(tmp_path):
+    from mst.providers import OpenAISpeechProvider
+    from mst.speech import MAX_SPEECH_BYTES, SpeechRequestError
+    project, files = audio_project(tmp_path)
+    with files[1].open("wb") as handle:
+        handle.truncate(MAX_SPEECH_BYTES + 1)
+    ingest_project(project, files)
+    previous = project_paths(project)["lesson_map"].read_bytes()
+    class Preflight(CountingSpeech):
+        validate_audio = OpenAISpeechProvider.validate_audio
+    provider = Preflight()
+    with pytest.raises(SpeechRequestError, match="整批尚未上传"):
+        transcribe_project_audio(project, provider)
+    assert provider.calls == []
+    assert project_paths(project)["lesson_map"].read_bytes() == previous
+
+
+def test_valid_legacy_receipt_is_reused_without_new_upload_preflight(tmp_path):
+    project, _ = audio_project(tmp_path)
+    transcribe_project_audio(project, CountingSpeech())
+    class Cached(CountingSpeech):
+        def validate_audio(self, audio_path):
+            pytest.fail("a valid completed receipt must not trigger an upload preflight")
+    provider = Cached()
+    assert transcribe_project_audio(project, provider) == 0
+    assert provider.calls == []
+
+
+def test_cli_uses_timestamped_default_and_handles_speech_failure_without_replacing_guide(tmp_path, monkeypatch, capsys):
+    from mst import providers
+    from mst.cli import main
+    from mst.speech import SpeechRequestError
+    project, _ = audio_project(tmp_path)
+    assert main(["generate", str(project)]) == 0
+    previous = project_paths(project)["study_guide"].read_bytes()
+    models = []
+    class Unavailable(CountingSpeech):
+        def transcribe(self, audio_path):
+            raise SpeechRequestError("转写服务未成功返回；没有自动重发录音。")
+    def factory(model):
+        models.append(model)
+        return Unavailable()
+    monkeypatch.setattr(providers, "OpenAISpeechProvider", factory)
+    assert main(["generate", str(project), "--speech-provider", "openai"]) == 1
+    assert models == ["whisper-1"]
+    assert "录音转写未完成" in capsys.readouterr().err
+    assert project_paths(project)["study_guide"].read_bytes() == previous

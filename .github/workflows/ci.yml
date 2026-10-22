@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
-            python -m pip install -e ".[dev,pdf]"
+            python -m pip install -e ".[dev,pdf,openai]"
           fi
           if [[ -f requirements-dev.txt ]]; then
             python -m pip install -r requirements-dev.txt

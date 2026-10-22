@@ -82,6 +82,13 @@ or explicitly refreshing may issue new paid calls. Concurrent CLI runs are
 not coordinated and may both issue a request. This cache does not change the
 web path's default of never uploading audio.
 
+The CLI speech adapter disables automatic retries and redirects for its own SDK
+client. Each upload is bounded to 24 MB by this product, with batch preflight
+before any service call. Model-specific response formats preserve only returned
+text, timing and speaker fields, never provider-supplied review or page-alignment
+claims. Raw service errors and credentials are not printed as transcription errors.
+An explicitly injected SDK client remains the caller's transport configuration.
+
 Browser uploads create local copies under `.study-jobs/`; completed and failed
 jobs remain there so users can retry or inspect earlier results.
 Supplementing an import copies only the explicitly retained files and new

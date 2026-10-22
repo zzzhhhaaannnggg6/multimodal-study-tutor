@@ -117,9 +117,14 @@ study validate-guide /tmp/my-lesson/derived/study-guide.json --strict
 ```bash
 python -m pip install -e '.[openai]'
 study generate /tmp/my-lesson --provider openai --model gpt-5-mini
-# 如果输入包含原始音频，可额外请求带时间戳转写
+# 如果输入包含原始音频，可显式请求分段转写（默认 whisper-1）
 study generate /tmp/my-lesson --speech-provider openai
 ```
+
+转写密钥从 `OPENAI_API_KEY` 读取。默认模型请求分段时间戳；主动指定
+`--speech-model gpt-4o-transcribe` 等模型时使用 JSON，未返回时间的文字保留为待定位，
+不推算时间。每段录音的本工具上传上限为 24 MB，整批在发送前检查；超限可压缩、分段
+或改交 SRT/VTT。自动转写不自动重试，已完成录音会复用本地结果。网页入口仍不上传录音。
 
 ## 证据契约
 

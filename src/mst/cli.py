@@ -16,6 +16,7 @@ from .models import LessonMap
 from .profiles import list_profiles
 from .reconstruct import build_scaffold, inspect_project_visuals
 from .validation import validate_lesson_map
+from .speech import DEFAULT_SPEECH_MODEL, SpeechRequestError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--provider", choices=("none", "mock", "openai"), default="none")
     generate.add_argument("--model", default="gpt-5-mini")
     generate.add_argument("--speech-provider", choices=("none", "openai"), default="none")
-    generate.add_argument("--speech-model", default="gpt-4o-transcribe")
+    generate.add_argument("--speech-model", default=DEFAULT_SPEECH_MODEL, help="transcription model; default whisper-1 requests segment timestamps; other models may return unlocated text")
     generate.add_argument("--refresh-transcription", action="store_true", help="explicitly call the speech service again instead of reusing local recordings' transcripts")
     generate.add_argument("--strict", action="store_true", help="fail if the guide is incomplete")
     generate.add_argument("--vision-provider", choices=("none", "openai"), default="none")
@@ -170,8 +171,21 @@ def main(argv: list[str] | None = None) -> int:
         if args.speech_provider == "openai":
             from .providers import OpenAISpeechProvider
 
-            added = transcribe_project_audio(args.project, OpenAISpeechProvider(args.speech_model), refresh=args.refresh_transcription)
+            speech = OpenAISpeechProvider(args.speech_model)
+            try:
+                added = transcribe_project_audio(args.project, speech, refresh=args.refresh_transcription)
+            except (SpeechRequestError, OSError, ValueError) as exc:
+                print(f"录音转写未完成：{exc}", file=sys.stderr)
+                return 1
+            finally:
+                close = getattr(speech, "close", None)
+                if callable(close):
+                    close()
             print(f"Added {added} audio segment(s); unchanged completed recordings reuse local transcripts")
+            untimed = sum(bool((row.get("metadata") or {}).get("transcription")) and row.get("start") is None
+                          for row in read_json(project_paths(args.project)["lesson_map"]).get("speech_segments", []))
+            if untimed:
+                print(f"{untimed} 段转写未提供时间戳，原文已保留，但不能据此精确定位录音。")
         if args.vision_provider == "openai":
             from .providers import OpenAIVisionProvider
 

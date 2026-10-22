@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import mimetypes
 import tempfile
 from pathlib import Path
@@ -19,6 +18,7 @@ from .multimodal import annotate_speech_metadata
 from .io import project_paths, read_json, write_json
 from .models import SpeechSegment, VisualFrame
 from .profiles import PROFILES
+from .speech import transcription_rows as _transcription_rows
 
 SUPPORTED_EXTENSIONS = {
     ".pptx": "slides",
@@ -120,29 +120,6 @@ def ingest_project(project_dir: str | Path, inputs: Iterable[str | Path]) -> dic
     return manifest
 
 
-def _transcription_rows(value: object) -> list[dict[str, object]]:
-    """Reject partial/malformed service output instead of caching lost speech."""
-    if not isinstance(value, list) or not value:
-        raise ValueError("转写未返回有效片段；请检查录音或服务后重试，已有来源未被覆盖。")
-    rows = []
-    for index, item in enumerate(value, 1):
-        if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
-            raise ValueError(f"转写第 {index} 段缺少有效文字；未保存这份不完整转写。")
-        row = {"text": item["text"], "segment_id": str(item.get("segment_id") or "")}
-        start, end = item.get("start"), item.get("end")
-        if start is not None or end is not None:
-            if (any(isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or t < 0 for t in (start, end))
-                    or end < start):
-                raise ValueError(f"转写第 {index} 段的起止时间无效；未保存这份不完整转写。")
-            row.update(start=start, end=end)
-        # Page alignment and review status are decided locally. Preserve only
-        # speech fields; provider metadata must not claim human verification.
-        if isinstance(item.get("speaker"), str):
-            row["speaker"] = item["speaker"]
-        rows.append(row)
-    return rows
-
-
 def _transcription_receipt(source: dict, provider: object, directory: Path) -> tuple[Path, dict]:
     identity = {"name": str(getattr(provider, "name", "unknown")), "model": str(getattr(provider, "model", ""))}
     # Compatible adapters may distinguish endpoint/options without persisting
@@ -203,6 +180,14 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
             if old_hash and old_hash != source["sha256"]:
                 raise ValueError(f"{source.get('name', '录音')}与已有转写的文件不同；请在新项目中导入，已有来源未被覆盖。")
     directory = paths["derived"] / "transcriptions"
+    validate_audio = getattr(provider, "validate_audio", None)
+    if callable(validate_audio):
+        # Catch a later oversized/unsupported recording before uploading the
+        # first. Completed receipts do not need to satisfy new upload limits.
+        for source in sources:
+            receipt_path, _ = _transcription_receipt(source, provider, directory)
+            if refresh or not receipt_path.exists():
+                validate_audio(str(source["path"]))
     for source in sources:
         source_id = str(source.get("source_id") or "")
         receipt_path, header = _transcription_receipt(source, provider, directory)
