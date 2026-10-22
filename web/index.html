@@ -137,6 +137,14 @@
       </section>
     </main>
 
+    <aside id="classroomPlayer" class="classroom-player card" aria-label="课堂录音回听" hidden>
+      <div class="recording-heading"><strong id="recordingTitle">课堂录音</strong><button id="closeRecording" class="secondary-button" type="button">关闭回听</button></div>
+      <p id="recordingLocation" class="small-note"></p>
+      <div id="recordingAudioBox"></div>
+      <div class="recording-actions"><button id="replayRecording" class="secondary-button" type="button">重听这一段</button><label>播放速度<select id="recordingSpeed"><option value="1">1 倍</option><option value="1.25">1.25 倍</option><option value="1.5">1.5 倍</option><option value="2">2 倍</option></select></label></div>
+      <p id="recordingMessage" class="small-note" role="status" aria-live="polite"></p>
+    </aside>
+
     <footer><span>本地优先 · 原始材料只读</span><span>学生正文优先，证据按需展开</span></footer>
   </body>
 </html>

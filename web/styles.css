@@ -115,3 +115,16 @@ pre { max-width:100%; overflow-x:auto; white-space:pre; }
 .material-pages img { display:block; width:100%; height:clamp(220px,55vh,560px); object-fit:contain; background:white; border:1px solid var(--line); }
 .material-pages .page-image-error { height:clamp(220px,55vh,560px); padding:12px; color:#805321; background:#fff2dc; font-size:13px; }
 @media (max-width:380px) { .material-pages { padding:8px; } .page-controls { gap:4px; } .page-controls button { padding:7px 6px; } }
+
+.recording-link { display:block; min-height:44px; text-align:left; overflow-wrap:anywhere; }
+.classroom-player { position:fixed; z-index:20; bottom:12px; left:50%; transform:translateX(-50%); width:min(680px,calc(100% - 24px)); max-height:70vh; overflow:auto; padding:12px 16px; box-shadow:0 6px 35px rgba(25,50,32,.22); }
+.classroom-player[hidden] { display:none; }
+.recording-heading,.recording-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.recording-heading strong { min-width:0; overflow-wrap:anywhere; font-size:14px; }
+.recording-heading button { flex-shrink:0; }
+.classroom-player audio { display:block; width:100%; min-width:0; margin:8px 0; }
+.classroom-player p { margin:6px 0; }
+.recording-actions label { display:flex; align-items:center; gap:6px; font-size:12px; }
+.recording-actions select { padding:6px; min-height:44px; font-size:16px; }
+.has-recording-player { padding-bottom:280px; }
+@media (max-width:380px) { .classroom-player { padding:10px; } .recording-actions { flex-wrap:wrap; } }

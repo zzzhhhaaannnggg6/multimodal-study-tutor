@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from .io import project_paths, read_json, write_json
 from .jobs import JobBusyError, JobManager
 from .profiles import PROFILES
+from .recordings import RecordingLibrary, byte_range
 
 
 def web_directory() -> Path:
@@ -40,6 +41,7 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
     jobs = JobManager(project, **({"runner": runner} if runner else {}), **({"provider_factory": provider_factory} if provider_factory else {}),
                       **({"speech_factory": speech_factory} if speech_factory else {}))
     progress_lock = threading.Lock()
+    recordings = RecordingLibrary()
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -60,6 +62,8 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
             if filename:
                 self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
+            if self.command == "HEAD":
+                return
             try:
                 self.wfile.write(payload)
             except (BrokenPipeError, ConnectionResetError):
@@ -95,11 +99,70 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                 raise PermissionError("课程路径无效。")
             return root
 
-        def guide_payload(self, root):
-            value = read_json(project_paths(root)["study_guide"])
+        def guide_payload(self, root, path=None):
+            value = read_json(path or project_paths(root)["study_guide"])
             if root != project:
                 value["_local_run_id"] = root.parent.name
+            prefix = f"/api/jobs/{root.parent.name}/recordings/" if root != project else "/api/recordings/"
+            refs = value.get("source_index", []) + [ref for unit in value.get("units", []) for ref in unit.get("source_refs", [])]
+            try:
+                value["_local_recordings"] = recordings.links(root, refs, prefix)
+                job = jobs.get(root.parent.name) if root != project else None
+                names = {item["stored_name"]: item["name"] for item in (job or {}).get("files", [])}
+                for item in value["_local_recordings"].values():
+                    item["name"] = names.get(item["name"], item["name"])
+            except (ValueError, OSError, TypeError):
+                value["_local_recordings"] = {}  # Optional playback must not prevent reading a saved guide.
             return value
+
+        def send_recording(self, root, token):
+            origin = self.headers.get("Origin")
+            if ((origin and origin != f"http://{self.headers.get('Host')}")
+                    or self.headers.get("Sec-Fetch-Site") in {"cross-site", "same-site"}):
+                self.reply({"error": "请从本地听课助手中回听录音。"}, 403)
+                return
+            try:
+                handle, size, content_type = recordings.open(root, token)
+            except (ValueError, OSError):
+                self.reply({"error": "这份本机录音已变化或不可用，请重新导入。原讲义仍可阅读。"}, 409)
+                return
+            with handle:
+                try:
+                    start, end = byte_range(self.headers.get("Range"), size)
+                except ValueError:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    return
+                partial = self.headers.get("Range") is not None
+                self.send_response(206 if partial else 200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(end - start + 1))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+                if partial:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.end_headers()
+                if self.command == "HEAD":
+                    return
+                handle.seek(start)
+                remaining = end - start + 1
+                try:
+                    while remaining:
+                        chunk = handle.read(min(256 * 1024, remaining))
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        remaining -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # Seeking or closing the player cancels the previous range.
+
+        def do_HEAD(self):
+            self.do_GET()
 
         def do_GET(self):
             if not self.trusted_host():
@@ -130,10 +193,12 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                     path = project_paths(root)["study_guide" if route.startswith("/study") else "lesson_map"]
                     if not path.exists():
                         path = root / route[1:]
-                    value = read_json(path)
-                    if route == "/study-guide.json" and root != project:
-                        value["_local_run_id"] = root.parent.name
+                    value = self.guide_payload(root, path) if route == "/study-guide.json" else read_json(path)
                     self.reply(value)
+                elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/recordings/([0-9a-f]{64})", route):
+                    self.send_recording(self.result_root(match[1]), match[2])
+                elif match := re.fullmatch(r"/api/recordings/([0-9a-f]{64})", route):
+                    self.send_recording(project, match[1])
                 elif match := re.fullmatch(r"/api/exports/(md|html|json)", route):
                     from .export import export_study_guide
                     with jobs.lock:
@@ -153,7 +218,7 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                         raise PermissionError("只能查看当前课程的渲染页面。")
                     self.send_payload(target.read_bytes(), {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(target.suffix, "application/octet-stream"))
                 elif route in {"/", "/index.html", "/app.js", "/progress.js", "/styles.css"}:
-                    super().do_GET()
+                    super().do_HEAD() if self.command == "HEAD" else super().do_GET()
                 else:
                     self.reply({"error": "页面不存在。"}, 404)
             except PermissionError as exc:

@@ -65,6 +65,7 @@
     save();
   }
   function navigate(view, index = state.index, scroll = null) {
+    closeRecording();
     remember();
     if (units().length) $("materialPanel").open = false;
     state.view = view;
@@ -92,6 +93,84 @@
     const fraction = Math.round((seconds - whole) * 1000);
     return [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60].map((part) => String(part).padStart(2, "0")).join(":") + (fraction ? `.${String(fraction).padStart(3,"0").replace(/0+$/,"")}` : "");
   }
+  let currentRecording = null, recordingTimer;
+  function localRecording(source) {
+    if (state.localGuide) return null;
+    const item = state.guide._local_recordings?.[source.ref];
+    if (!item || !/^\/api\/(?:jobs\/[a-f0-9]{32}\/)?recordings\/[a-f0-9]{64}$/.test(item.url)
+        || typeof item.start !== "number" || !Number.isFinite(item.start) || item.start < 0
+        || (item.end != null && (typeof item.end !== "number" || !Number.isFinite(item.end) || item.end <= item.start))) return null;
+    return item;
+  }
+  function recordingButton(source) {
+    const item = localRecording(source);
+    return item ? `<button class="link-button recording-link" data-listen-ref="${esc(source.ref)}" type="button">听这一段 · ${timestamp(item.start)}${item.end != null ? `–${timestamp(item.end)}` : " 起"}</button>` : "";
+  }
+  function teacherRecordings(rows) {
+    const seen = new Set();
+    return list(rows).filter((source) => {
+      const item = localRecording(source);
+      if (!item || !["aligned", "verified", "supplement", "covered"].includes(item.status)) return false;
+      const key = `${item.url}:${item.start}:${item.end}`;
+      if (seen.has(key)) return false;
+      seen.add(key); return true;
+    }).map(recordingButton).join("");
+  }
+  function closeRecording() {
+    const audio = $("classroomAudio");
+    currentRecording = null;
+    clearTimeout(recordingTimer);
+    if (audio) { audio.onloadedmetadata = audio.onseeked = audio.ontimeupdate = audio.onplaying = audio.onratechange = audio.onpause = audio.onended = audio.onerror = null; audio.pause(); audio.removeAttribute("src"); audio.load(); }
+    $("recordingAudioBox").replaceChildren();
+    $("classroomPlayer").hidden = true;
+    document.body.classList.remove("has-recording-player");
+  }
+  function playRecording(selection) {
+    const item = {...selection};
+    closeRecording();
+    currentRecording = item;
+    const audio = document.createElement("audio");
+    audio.id = "classroomAudio"; audio.controls = true; audio.preload = "metadata";
+    audio.setAttribute("aria-label", "播放所选课堂时间段");
+    $("recordingAudioBox").append(audio);
+    $("recordingTitle").textContent = item.name || "课堂录音";
+    $("recordingLocation").textContent = `${timestamp(item.start)}${item.end != null ? `–${timestamp(item.end)}` : " 起（结束未标注）"} · 仅在本机播放`;
+    $("recordingMessage").textContent = ["pending", "unresolved"].includes(item.status) ? "这段录音与课件的配对待确认，回听不代表已核实。" : "正在定位这段录音…";
+    $("classroomPlayer").hidden = false;
+    document.body.classList.add("has-recording-player");
+    const play = () => {
+      if (currentRecording !== item) return;
+      audio.playbackRate = Number($("recordingSpeed").value);
+      audio.play().catch(() => { if (currentRecording === item && !audio.error) $("recordingMessage").textContent = "已定位，请点播放器中的播放按钮。"; });
+    };
+    const checkEnd = () => {
+      clearTimeout(recordingTimer);
+      if (currentRecording !== item || item.end == null) return;
+      if (audio.currentTime >= item.end - 0.01) {
+        audio.pause();
+        if (Math.abs(audio.currentTime - item.end) > 0.01) audio.currentTime = item.end;
+        $("recordingMessage").textContent = "已到本段末尾。可以重听，或关闭回听继续学习。";
+      } else if (!audio.paused) {
+        recordingTimer = setTimeout(checkEnd, Math.max(15, (item.end - audio.currentTime) / audio.playbackRate * 1000));
+      }
+    };
+    audio.onloadedmetadata = () => {
+      if (currentRecording !== item) return;
+      if (!Number.isFinite(audio.duration) || item.start >= audio.duration) {
+        $("recordingMessage").textContent = "标注时间超出录音时长，请核对转写时间；未从头替代播放。";
+        return;
+      }
+      if (item.start === 0) play();
+      else { audio.onseeked = () => { audio.onseeked = null; play(); }; audio.currentTime = item.start; }
+    };
+    audio.ontimeupdate = audio.onratechange = checkEnd;
+    audio.onpause = () => clearTimeout(recordingTimer);
+    audio.onended = () => { if (currentRecording === item && (item.end == null || item.end > audio.duration)) $("recordingMessage").textContent = "录音已结束。可以重听，或关闭回听继续学习。"; };
+    audio.onplaying = () => { if (currentRecording === item) { $("recordingMessage").textContent = ["pending", "unresolved"].includes(item.status) ? "正在回听；与课件的配对仍待确认。" : "正在回听所选时间段。"; checkEnd(); } };
+    audio.onerror = () => { if (currentRecording === item) $("recordingMessage").textContent = "暂时无法播放这份本机录音。请检查文件是否变化，或转为 MP3、M4A、WAV 后重新导入；原讲义仍可阅读。"; };
+    audio.src = item.url;
+    audio.load();
+  }
   function pageImageURL(source, runId = state.guide._local_run_id, local = state.localGuide) {
     if (local || typeof source.image_path !== "string") return null;
     const parts = source.image_path.split("/");
@@ -113,7 +192,7 @@
       const location = source.page != null ? `第 ${source.page} 页` : source.start != null ? `${timestamp(source.start)}${source.end != null ? `–${timestamp(source.end)}` : " 起（结束未标注）"}` : "待定位";
       const url = pageImageURL(source);
       const image = url ? `<small><a href="${url}" target="_blank" rel="noopener">查看页面图像</a></small>` : "";
-      return `<li><span class="source-label">${esc(source.label || "材料依据")}</span>${esc(location)}${image}${source.note ? `<small>${lines(source.note)}</small>` : ""}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`;
+      return `<li><span class="source-label">${esc(source.label || "材料依据")}</span>${esc(location)}${image}${recordingButton(source)}${source.note ? `<small>${lines(source.note)}</small>` : ""}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`;
     }).join("")}</ul>` : '<p class="muted">暂无可定位来源。</p>';
   }
   function render() {
@@ -150,7 +229,7 @@
     const unit = active();
     $("unitNav").innerHTML = units().map((item, index) => `<button class="nav-item ${index === state.index ? "is-active" : ""} ${done(item) ? "is-done" : ""}" data-unit="${index}" type="button"><span>${done(item) ? "✓" : index + 1}</span>${esc(item.title)}</button>`).join("");
     if (!unit) { $("lessonContent").innerHTML = '<p class="empty">导入材料后，这里会显示精讲。</p>'; return; }
-    const section = (title, body, className = "") => `<section class="lesson-section ${className}"><h3>${title}</h3>${body}${title === "材料中看什么" ? materialFigures(unit.source_refs) : ""}</section>`;
+    const section = (title, body, className = "") => `<section class="lesson-section ${className}"><h3>${title}</h3>${body}${title === "材料中看什么" ? materialFigures(unit.source_refs) : ""}${className === "teacher" ? teacherRecordings(unit.source_refs) : ""}</section>`;
     const examples = list(unit.worked_examples).map((example) => section(example.complete ? "完整例题" : "例题待补充", `<p class="question"><b>题目：</b>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><b>答案：</b>${lines(example.answer)}</p><p class="variation"><b>换一个条件：</b>${lines(example.variation)}</p>`, "example")).join("");
     const mistakes = list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("");
     const onlyMaterial = unit.content_mode === "material-only";
@@ -178,6 +257,7 @@
   }
   async function loadGuide(guide, local = false, keepMaterialsOpen = false) {
     if (guide?.guide_kind !== "student-study-guide" || !Array.isArray(guide.units)) throw new Error("请选择生成的自学讲义文件；原课件请从下方导入。");
+    closeRecording();
     remember();
     await saveServer();
     const loading = ++state.loading;
@@ -355,7 +435,12 @@
     renderMaterials();
   }
   async function boot() {
+    $("closeRecording").onclick = () => { closeRecording(); };
+    $("replayRecording").onclick = () => { if (currentRecording) playRecording(currentRecording); };
+    $("recordingSpeed").onchange = () => { if ($("classroomAudio")) $("classroomAudio").playbackRate = Number($("recordingSpeed").value); };
     document.addEventListener("click", (event) => {
+      const listen = event.target.closest("[data-listen-ref]");
+      if (listen) { const item = localRecording({ref:listen.dataset.listenRef}); if (item) playRecording(item); return; }
       const pageButton = event.target.closest("[data-page-step]");
       if (pageButton) {
         const panel = pageButton.closest(".material-pages");
@@ -434,6 +519,7 @@
   window.StudyDesktop = {
     ready: false,
     async prepareToClose() {
+      closeRecording();
       remember(true);
       clearTimeout(saveTimer);
       let timeout;

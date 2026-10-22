@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 from fake_speech_service import SpeechService
+from audio_fixtures import silent_wav
 
 
 def pdf_fixture() -> bytes:
@@ -53,7 +54,7 @@ const files = new DataTransfer();
 files.items.add(new File(['# 二进制转十进制\\n将二进制 (1101)2 转换为十进制，按位权展开计算。'], '合成课程.md', {type:'text/markdown'}));
 files.items.add(new File([Uint8Array.from(atob(PDF_BYTES), c=>c.charCodeAt(0))], '合成页面.pdf', {type:'application/pdf'}));
 files.items.add(new File(['# 二进制减法\\nBinary subtraction: 10000-00001'], '合成借位.md', {type:'text/markdown'}));
-files.items.add(new File(['synthetic-native-audio-marker'], '合成录音.mp3', {type:'audio/mpeg'}));
+files.items.add(new File([Uint8Array.from(atob(AUDIO_BYTES), c=>c.charCodeAt(0))], '合成录音.wav', {type:'audio/wav'}));
 $('sourceFiles').files=files.files;
 $('sourceFiles').dispatchEvent(new Event('change', {bubbles:true}));
 $('subject').value='computer-systems';
@@ -71,10 +72,23 @@ await wait(()=> document.querySelector('#routeCards .unit-card') && $('uploadMes
 const job=(await(await fetch('api/jobs/latest')).json()).job;
 assert(job.status==='succeeded', 'generation did not succeed');
 assert(job.materials.length===4, 'missing per-file receipts');
-assert(job.speech.stats.requests===1 && job.materials.find(x=>x.name.endsWith('.mp3')).timed_segment_count===1, 'native speech request did not preserve time');
+assert(job.speech.stats.requests===1 && job.materials.find(x=>x.name.endsWith('.wav')).timed_segment_count===1, 'native speech request did not preserve time');
 assert($('speechApiKey').value==='' && !$('speechConsent').checked, 'audio credentials or consent retained after submit');
 assert(job.materials.find(x=>x.name.endsWith('.pdf')).status !== 'unreadable', 'PDF must work without system pdftotext');
 const guide=await(await fetch('study-guide.json')).json();
+const recording=Object.values(guide._local_recordings)[0];
+assert(recording && recording.start===1.25 && recording.end===3.75, 'local recording source not linked');
+assert(!document.querySelector('#classroomAudio'), 'must not preload classroom audio');
+document.querySelector('#sourcesSection > details').open=true;
+document.querySelector('#sourceList [data-listen-ref]').click();
+await wait(()=>$('classroomAudio')?.duration===6 && $('classroomAudio').currentTime>=1.25);
+assert($('recordingTitle').textContent==='合成录音.wav', 'must show original name, not storage index');
+$('recordingSpeed').value='2'; $('recordingSpeed').dispatchEvent(new Event('change', {bubbles:true}));
+await wait(()=>$('recordingMessage').textContent.includes('已到本段末尾'));
+assert($('classroomAudio').paused && $('classroomAudio').currentTime<4.4, 'native audio did not stop at clip end');
+$('closeRecording').click();
+assert(!$('classroomAudio') && $('classroomPlayer').hidden, 'native audio retained after closing');
+document.querySelector('#sourcesSection > details').open=false;
 const numeric=guide.units[0];
 assert(numeric.worked_examples[0].complete && numeric.worked_examples[0].answer.includes('(13)₁₀'), 'flattened base must produce the original concrete worked answer');
 assert(numeric.practice_items.find(x=>x.kind==='transfer').answer.includes('(14)₁₀'), 'numeric variant must be solved, not an outline');
@@ -116,7 +130,7 @@ answer.dispatchEvent(new Event('input', {bubbles:true}));
 $('markUnit').click();
 const closing=await window.StudyDesktop.prepareToClose();
 assert(closing.saved && !closing.busy, 'close did not flush the newest answer');
-return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, binary_borrowing:true, speech_transcribed:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
+return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, binary_borrowing:true, speech_transcribed:true, local_recording_playback:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
 """
 
 SECOND = """
@@ -133,9 +147,13 @@ $('generateButton').click();
 await wait(async()=> { const current=(await(await fetch('api/jobs/latest')).json()).job; return current.job_id!==job.job_id && current.status==='succeeded'; });
 const revised=(await(await fetch('api/jobs/latest')).json()).job;
 assert(revised.speech.provider==='none', 'local revision must not require a transcription service');
-assert(revised.materials.find(x=>x.name.endsWith('.mp3')).timed_segment_count===1, 'local revision lost saved speech');
+assert(revised.materials.find(x=>x.name.endsWith('.wav')).timed_segment_count===1, 'local revision lost saved speech');
 const restoredGuide=await(await fetch('study-guide.json')).json();
 assert(restoredGuide.generation_report.total_segments===1, 'local revision lost audio source');
+const recording=Object.values(restoredGuide._local_recordings)[0];
+assert(recording && recording.url.includes(revised.job_id), 'local revision must link its own recording');
+const range=await fetch(recording.url, {headers:{Range:'bytes=0-3'}});
+assert(range.status===206 && await range.text()==='RIFF', 'reopened native app lost actual recording bytes');
 return {passed:true, job_id:job.job_id, restored:true, cached_speech_reused:true, revised_job_id:revised.job_id};
 """
 
@@ -165,6 +183,7 @@ def run_check(app: Path, output: Path) -> None:
             script = output / f"launch-{index}.js"
             source = SETUP + body.replace("PDF_BYTES", json.dumps(base64.b64encode(pdf_fixture()).decode()))
             source = source.replace("SPEECH_URL", json.dumps(speech.base_url))
+            source = source.replace("AUDIO_BYTES", json.dumps(base64.b64encode(silent_wav()).decode()))
             source = source.replace("OLD_JOB", json.dumps(results[0]["job_id"]) if results else "null")
             script.write_text(source, encoding="utf-8")
             child = subprocess.Popen([str(launched_app / "Contents/MacOS/StudyTutor"), "--workspace", str(workspace),
@@ -190,7 +209,7 @@ def run_check(app: Path, output: Path) -> None:
             assert (output / f"launch-{index}.png").stat().st_size > 1000
             results.append(result)
         assert len(speech.requests) == 1, "local retry uploaded completed audio again"
-        assert speech.requests[0]["fields"]["file"] == b"synthetic-native-audio-marker"
+        assert speech.requests[0]["fields"]["file"] == silent_wav()
         assert all(b"native-synthetic-speech-key" not in path.read_bytes() for path in workspace.rglob("*") if path.is_file())
     assert "二进制" in (downloads / "study-guide.md").read_text(encoding="utf-8")
     assert not list(downloads.glob(".mst-download-*.partial")), "unfinished native download files"

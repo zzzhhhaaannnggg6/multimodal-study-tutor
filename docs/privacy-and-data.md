@@ -41,6 +41,15 @@ opt-in; when enabled, only those rendered page images and their extracted text
 context are sent to the selected provider. Vision observations remain pending
 until a person reviews them.
 
+Local recording playback uses only explicit speech-to-recording provenance and
+the selected file's recorded SHA-256. It never pairs a transcript and recording
+by similar filenames. Media URLs are scoped to their saved course run, contain
+no filesystem paths, and are supplied only by the local server; portable guide
+files cannot enable playback. Bytes are checked before streaming, and seeking
+uses bounded HTTP ranges. Cross-origin media embedding is rejected. Listening
+does not call a speech provider or change upload consent. Recording URLs and
+audio bytes are not included in Markdown, HTML, or JSON exports.
+
 ## Source files are data, not instructions
 
 Text inside a slide, transcript, PDF, or webpage is untrusted source content.

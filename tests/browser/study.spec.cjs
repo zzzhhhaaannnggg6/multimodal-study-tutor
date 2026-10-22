@@ -81,6 +81,104 @@ test("a missing source image gives an honest readable fallback", async ({page}) 
   await expect(page.locator("#lessonContent h2")).toHaveText("从证据到机制");
 });
 
+test("student hears the exact local classroom segment and returns without losing work", async ({page}, testInfo) => {
+  const requests = [];
+  page.on("request", (item) => { if (item.url().includes("/recordings/")) requests.push(item.url()); });
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  const answer = page.locator("#lessonContent textarea").first();
+  await answer.fill("回听前写下的推理");
+  const listen = page.locator("#lessonContent .teacher [data-listen-ref]");
+  await expect(listen).toHaveCount(1);
+  await expect(listen).toContainText("00:00:01.25–00:00:03.75");
+  await expect(page.locator("#classroomAudio")).toHaveCount(0);
+  expect(requests).toEqual([]); // No recording is fetched before the student's click.
+  await listen.click();
+  const audio = page.locator("#classroomAudio");
+  await expect.poll(() => audio.evaluate((node) => node.currentTime)).toBeGreaterThanOrEqual(1.25);
+  await expect.poll(() => audio.evaluate((node) => node.paused)).toBe(false);
+  expect(await audio.evaluate((node) => node.duration)).toBe(6);
+  await page.locator("#recordingSpeed").selectOption("2");
+  await expect.poll(() => audio.evaluate((node) => node.playbackRate)).toBe(2);
+  await expect(page.locator("#recordingMessage")).toContainText("已到本段末尾");
+  expect(await audio.evaluate((node) => node.paused)).toBe(true);
+  expect(await audio.evaluate((node) => node.currentTime)).toBeLessThan(4.4);
+  await page.locator("#replayRecording").click();
+  await page.evaluate(() => { document.getElementById("replayRecording").click(); document.getElementById("replayRecording").click(); });
+  await expect.poll(() => page.locator("#classroomAudio").evaluate((node) => node.currentTime)).toBeGreaterThanOrEqual(1.25);
+  await expect.poll(() => page.locator("#classroomAudio").evaluate((node) => node.currentTime)).toBeLessThan(3.75);
+  await expect(page.locator("#recordingLocation")).toContainText("仅在本机播放");
+  await expect(page.locator("#recordingTitle")).toHaveText("合成课堂.wav");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+  await page.screenshot({path:testInfo.outputPath("classroom-playback.png")});
+  await page.locator("#closeRecording").click();
+  await expect(page.locator("#classroomAudio")).toHaveCount(0);
+  await expect(answer).toHaveValue("回听前写下的推理");
+  await expect(page.locator("#progressText")).toContainText("0/2");
+  await listen.click();
+  await page.locator("#nextUnit").click();
+  await expect(page.locator("#classroomPlayer")).toBeHidden();
+  await expect(page.locator("#classroomAudio")).toHaveCount(0);
+});
+
+test("unmatched speech stays in sources and recording failure leaves the lesson usable", async ({page}) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  await expect(page.locator('#lessonContent .teacher [data-listen-ref="fixture::recording::1"]')).toHaveCount(0);
+  await page.locator("#sourcesSection > details > summary").click();
+  await expect(page.locator('#sourceList [data-listen-ref="fixture::recording::2"]')).toHaveCount(0); // Untimed.
+  await page.locator('#sourceList [data-listen-ref="fixture::recording::1"]').click();
+  await expect(page.locator("#recordingTitle")).toHaveText("另一份录音.wav");
+  await expect(page.locator("#recordingMessage")).toContainText("配对");
+  await expect.poll(() => page.locator("#classroomAudio").evaluate((node) => node.duration)).toBe(7);
+  await page.locator("#closeRecording").click();
+  await page.route("**/recordings/*", (route) => route.fulfill({status:409, contentType:"application/json", body:'{"error":"changed"}'}));
+  await page.locator("#lessonContent .teacher [data-listen-ref]").click();
+  await expect(page.locator("#recordingMessage")).toContainText("暂时无法播放");
+  await page.locator("#closeRecording").click();
+  await page.locator("#lessonContent textarea").first().fill("录音不可用时仍可作答");
+  await expect(page.locator("#lessonContent textarea").first()).toHaveValue("录音不可用时仍可作答");
+});
+
+test("opening a portable guide cannot play supplied local or external recording URLs", async ({page, request}) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  const guide = await (await request.get("/study-guide.json")).json();
+  for (const item of Object.values(guide._local_recordings)) item.url = "https://example.invalid/private-audio.wav";
+  await page.locator("#guideFile").setInputFiles({name:"guide.json", mimeType:"application/json", buffer:Buffer.from(JSON.stringify(guide))});
+  await page.locator("#startLearning").click();
+  await expect(page.locator("[data-listen-ref]")).toHaveCount(0);
+  await expect(page.locator("#classroomAudio")).toHaveCount(0);
+});
+
+test("invalid clip times never start from zero and an unknown end stays explicit", async ({page}) => {
+  let outside = true;
+  await page.route("**/study-guide.json", async (route) => {
+    const response = await route.fetch();
+    const guide = await response.json();
+    Object.assign(guide._local_recordings["fixture::recording::0"], outside ? {start:30,end:35} : {start:1.25,end:null});
+    await route.fulfill({response, json:guide});
+  });
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  await page.locator("#lessonContent .teacher [data-listen-ref]").click();
+  await expect(page.locator("#recordingMessage")).toContainText("超出录音时长");
+  expect(await page.locator("#classroomAudio").evaluate((node) => node.paused)).toBe(true);
+  expect(await page.locator("#classroomAudio").evaluate((node) => node.currentTime)).toBe(0);
+  outside = false;
+  await page.reload();
+  await expect(page.locator("#lessonContent .teacher [data-listen-ref]")).toContainText("00:00:01.25 起");
+  await page.locator("#lessonContent .teacher [data-listen-ref]").click();
+  await expect(page.locator("#recordingLocation")).toContainText("结束未标注");
+  await expect.poll(() => page.locator("#classroomAudio").evaluate((node) => node.currentTime)).toBeGreaterThanOrEqual(1.25);
+  await page.locator("#recordingSpeed").selectOption("2");
+  await expect(page.locator("#recordingMessage")).toContainText("录音已结束");
+  await page.locator("#closeRecording").click();
+});
+
 test("a slowly loaded original page cannot move the student's reading position", async ({page}) => {
   let release;
   const held = new Promise((resolve) => { release = resolve; });

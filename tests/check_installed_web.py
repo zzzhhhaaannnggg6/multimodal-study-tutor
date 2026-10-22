@@ -75,6 +75,17 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
             cached = submit(f"/api/jobs/{audio_job['job_id']}/revise", {"keep": [item["stored_name"] for item in audio_job["files"]], "speech": {"provider": "none"}})
             assert cached["materials"][1]["timed_segment_count"] == 1
             assert len(speech.requests) == 1 and speech.requests[0]["fields"]["file"] == b"installed-wheel-synthetic-audio"
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", "/study-guide.json")
+            guide = json.loads(connection.getresponse().read())
+            connection.close()
+            recording = next(iter(guide["_local_recordings"].values()))
+            assert recording["start"] == 1.25 and recording["end"] == 3.75 and cached["job_id"] in recording["url"]
+            connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", recording["url"], headers={"Range": "bytes=0-8"})
+            response = connection.getresponse()
+            assert response.status == 206 and response.read() == b"installed"
+            connection.close()
     finally:
         server.shutdown()
         server.server_close()
@@ -83,6 +94,7 @@ print("Installed wheel: HTML, JavaScript and CSS served outside checkout.")
 print("Installed wheel: saved material revision and extraction receipts verified.")
 print("Installed wheel: explicit model generation verified against loopback-only synthetic API.")
 print("Installed wheel: explicit audio transcription and local-only revision verified without a speech SDK.")
+print("Installed wheel: local playback source and exact byte-range seeking verified after revision.")
 with tempfile.TemporaryDirectory(prefix="mst-installed-audio-") as directory:
     root = Path(directory)
     project = root / "course"
