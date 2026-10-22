@@ -128,7 +128,7 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
     if not map_path.exists():
         raise FileNotFoundError(f"lesson map does not exist: {map_path}; run study build first")
     data = read_json(map_path)
-    existing = {str(item.get("segment_id")) for item in data.get("speech_segments", []) if isinstance(item, dict)}
+    existing = {str(item.get("segment_id")): item for item in data.get("speech_segments", []) if isinstance(item, dict)}
     segments = list(data.get("speech_segments", []))
     added = 0
     transcribe = getattr(provider, "transcribe", None)
@@ -140,26 +140,46 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
         source_path = source.get("path")
         if not source_path:
             continue
+        source_id = str(source.get("source_id") or "")
+        if not source_id:
+            raise ValueError("录音缺少来源标识，请重新导入材料。")
         rows = transcribe(str(source_path))
         for index, row in enumerate(rows, 1):
             if not isinstance(row, dict):
                 continue
-            segment_id = str(row.get("segment_id") or f"{source.get('source_id', 'audio')}::s{index:04d}")
-            if segment_id in existing:
+            # Providers often restart numbering for every file. Source and
+            # ordinal, rather than that provider-local ID, identify our record.
+            segment_id = f"{source_id}::transcription::{index:04d}"
+            provider_id = str(row.get("segment_id") or "")
+            previous = existing.get(segment_id)
+            if previous is None:
+                legacy = existing.get(provider_id or f"{source_id}::s{index:04d}")
+                if legacy and legacy.get("source_id") == source_id:
+                    previous = legacy  # Preserve already referenced legacy IDs.
+            if previous is not None:
+                old_hash = (previous.get("metadata") or {}).get("transcription", {}).get("source_sha256")
+                if (previous.get("source_id") != source_id or (old_hash and old_hash != source.get("sha256"))
+                        or any(previous.get(key) != row.get(key) for key in ("text", "start", "end"))):
+                    raise ValueError(f"{source.get('name', '录音')}第 {index} 段与已有转写不同；请核对转写或在新项目中重新导入，已有来源未被覆盖。")
                 continue
+            metadata = annotate_speech_metadata(row.get("metadata"), str(row.get("text", "")))
+            metadata["transcription"] = {"provider": str(getattr(provider, "name", "unknown")),
+                "provider_segment_id": provider_id, "segment_index": index,
+                "source_sha256": source.get("sha256")}
             segment = dict(row)
+            segment.pop("alignment", None)  # A transcriber cannot verify page alignment.
             segment.update(
                 {
                     "segment_id": segment_id,
-                    "source_id": source.get("source_id"),
-                    "media_id": source.get("source_id"),
+                    "source_id": source_id,
+                    "media_id": source_id,
                     "kind": "lecture",
-                    "status": row.get("status", "pending"),
-                    "metadata": annotate_speech_metadata(row.get("metadata"), str(row.get("text", ""))),
+                    "status": "pending",
+                    "metadata": metadata,
                 }
             )
             segments.append(segment)
-            existing.add(segment_id)
+            existing[segment_id] = segment
             added += 1
     pages = [VisualFrame.from_dict(item) for item in data.get("pages", data.get("visual_sources", [])) if isinstance(item, dict)]
     aligned = align_speech_to_visuals(pages, [SpeechSegment.from_dict(item) for item in segments if isinstance(item, dict)])

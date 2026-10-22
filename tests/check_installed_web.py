@@ -9,6 +9,9 @@ from pathlib import Path
 
 from mst.server import create_server, web_directory
 from mst.evaluation import evaluate_suite
+from mst.ingest import ingest_project, init_project, transcribe_project_audio
+from mst.io import project_paths, read_json
+from mst.reconstruct import build_scaffold
 from fake_model_service import FakeModelService
 
 assert Path(sys.prefix).resolve() in web_directory().resolve().parents, web_directory()
@@ -58,6 +61,25 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
 print("Installed wheel: HTML, JavaScript and CSS served outside checkout.")
 print("Installed wheel: saved material revision and extraction receipts verified.")
 print("Installed wheel: explicit model generation verified against loopback-only synthetic API.")
+with tempfile.TemporaryDirectory(prefix="mst-installed-audio-") as directory:
+    root = Path(directory)
+    project = root / "course"
+    recordings = [root / "part-1.mp3", root / "part-2.mp4"]
+    for path in recordings:
+        path.write_bytes(b"synthetic placeholder; no real audio or remote service")
+    init_project(project)
+    ingest_project(project, recordings)
+    build_scaffold(project)
+    class SyntheticSpeech:
+        name = "synthetic-speech"
+        def transcribe(self, path):
+            return [{"segment_id": "speech::0001", "text": "说明来自 " + Path(path).name, "start": 1, "end": 3}]
+    assert transcribe_project_audio(project, SyntheticSpeech()) == 2
+    assert transcribe_project_audio(project, SyntheticSpeech()) == 0
+    rows = read_json(project_paths(project)["lesson_map"])["speech_segments"]
+    assert len({row["segment_id"] for row in rows}) == 2
+    assert len({row["source_id"] for row in rows}) == 2
+print("Installed wheel: recording-local synthetic IDs retained both sources without duplicates.")
 for name in ("number-conversion-v1.json", "number-notation-v1.json"):
     bank = Path(__file__).resolve().parents[1] / "evals" / name
     evaluation = evaluate_suite(bank)

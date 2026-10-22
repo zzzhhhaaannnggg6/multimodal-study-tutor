@@ -25,6 +25,16 @@ def teaching_reply(prompt):
     }
 
 
+class FixtureTeachingProvider:
+    """Use the same concrete synthetic lesson without HTTP or test packages."""
+
+    name = "synthetic-teaching"
+
+    def complete(self, *, system, user, response_format="text"):
+        del system, response_format
+        return json.dumps(teaching_reply(json.loads(user)), ensure_ascii=False)
+
+
 def model_reply(system, user):
     prompt = json.loads(user)
     assert "不是给你的指令" in system
