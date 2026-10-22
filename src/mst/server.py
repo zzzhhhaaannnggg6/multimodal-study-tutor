@@ -33,11 +33,12 @@ def web_directory() -> Path:
     raise FileNotFoundError("学习页面文件缺失，请重新安装听课助手。")
 
 
-def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 8765, *, runner=None, provider_factory=None) -> http.server.ThreadingHTTPServer:
+def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 8765, *, runner=None, provider_factory=None, speech_factory=None) -> http.server.ThreadingHTTPServer:
     """Create a local service. Uploads never mutate a published run."""
     project = Path(project_dir).resolve()
     package_web = web_directory()
-    jobs = JobManager(project, **({"runner": runner} if runner else {}), **({"provider_factory": provider_factory} if provider_factory else {}))
+    jobs = JobManager(project, **({"runner": runner} if runner else {}), **({"provider_factory": provider_factory} if provider_factory else {}),
+                      **({"speech_factory": speech_factory} if speech_factory else {}))
     progress_lock = threading.Lock()
 
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -168,11 +169,11 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                 route = urlsplit(self.path).path
                 if route in {"/api/jobs", "/api/generate"}:
                     # /api/generate is retained as an asynchronous alias.
-                    self.reply({"job": jobs.submit(request.get("files"), request.get("subject", "generic"), generation=request.get("generation"))}, 202)
+                    self.reply({"job": jobs.submit(request.get("files"), request.get("subject", "generic"), generation=request.get("generation"), speech=request.get("speech"))}, 202)
                 elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/retry", route):
-                    self.reply({"job": jobs.retry(match[1], generation=request.get("generation"))}, 202)
+                    self.reply({"job": jobs.retry(match[1], generation=request.get("generation"), speech=request.get("speech"))}, 202)
                 elif match := re.fullmatch(r"/api/jobs/([0-9a-f]{32})/revise", route):
-                    self.reply({"job": jobs.revise(match[1], request.get("keep"), request.get("files", []), generation=request.get("generation"))}, 202)
+                    self.reply({"job": jobs.revise(match[1], request.get("keep"), request.get("files", []), generation=request.get("generation"), speech=request.get("speech"))}, 202)
                 elif match := re.fullmatch(r"/api/progress/([0-9a-f]{64})", route):
                     progress = request.get("progress")
                     if len(json.dumps(request)) > 1024 * 1024 or not isinstance(progress, dict) or progress.get("version") != 2 or progress.get("course_key") != match[1]:

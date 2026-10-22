@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import re
 import tempfile
 from pathlib import Path
 from typing import Iterable
@@ -120,6 +121,60 @@ def ingest_project(project_dir: str | Path, inputs: Iterable[str | Path]) -> dic
     return manifest
 
 
+def _receipt_path(directory: Path, header: dict) -> Path:
+    digest = hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()
+    return directory / f"{digest}.json"
+
+
+def _saved_transcriptions(directory: Path) -> list[tuple[dict, list[dict]]]:
+    receipts = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            value = read_json(path)
+            header = {key: value[key] for key in ("schema_version", "source_id", "source_sha256", "provider")}
+            identity = header["provider"]
+            if (header["schema_version"] != 1 or not isinstance(header["source_id"], str)
+                    or not isinstance(header["source_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", header["source_sha256"])
+                    or not isinstance(identity, dict) or set(identity) != {"name", "model", "options_sha256"}
+                    or not all(isinstance(item, str) for item in identity.values())
+                    or not re.fullmatch(r"[0-9a-f]{64}", identity["options_sha256"])
+                    or path != _receipt_path(directory, header)):
+                raise ValueError("receipt identity mismatch")
+            receipts.append((header, _transcription_rows(value["segments"])))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise ValueError("本地转写记录损坏；请核对保存的录音与转写，程序未自动上传录音。") from exc
+    return receipts
+
+
+def copy_transcription_receipts(previous: Path, current: Path, retained: dict[str, str]) -> int:
+    """Copy only selected recordings' validated results, remapping source IDs."""
+    directory = project_paths(previous)["derived"] / "transcriptions"
+    if not directory.exists() or not retained:
+        return 0
+    old = {row["name"]: row for row in read_json(project_paths(previous)["manifest"])["source_manifest"]}
+    new = {row["name"]: row for row in read_json(project_paths(current)["manifest"])["source_manifest"]}
+    sources = []
+    for current_name, previous_name in retained.items():
+        source, before = new.get(current_name), old.get(previous_name)
+        if not source or source.get("kind") not in {"audio", "video"} or not before:
+            continue
+        if before["sha256"] != source["sha256"]:
+            raise ValueError("保留的录音与已有转写文件不同；请取消保留旧录音并重新添加，尚未上传录音。")
+        sources.append((source, before))
+    if not sources:
+        return 0
+    receipts = _saved_transcriptions(directory)
+    copies = []
+    for source, before in sources:
+        for header, rows in receipts:
+            if header["source_id"] == before["source_id"] and header["source_sha256"] == source["sha256"]:
+                copies.append(({**header, "source_id": source["source_id"]}, rows))
+    destination = project_paths(current)["derived"] / "transcriptions"
+    for header, rows in copies:
+        write_json(_receipt_path(destination, header), {**header, "segments": rows})
+    return len(copies)
+
+
 def _transcription_receipt(source: dict, provider: object, directory: Path) -> tuple[Path, dict]:
     identity = {"name": str(getattr(provider, "name", "unknown")), "model": str(getattr(provider, "model", ""))}
     # Compatible adapters may distinguish endpoint/options without persisting
@@ -127,8 +182,7 @@ def _transcription_receipt(source: dict, provider: object, directory: Path) -> t
     options = str(getattr(provider, "transcription_cache_key", ""))
     identity["options_sha256"] = hashlib.sha256(options.encode()).hexdigest()
     header = {"schema_version": 1, "source_id": source["source_id"], "source_sha256": source["sha256"], "provider": identity}
-    digest = hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()
-    return directory / f"{digest}.json", header
+    return _receipt_path(directory, header), header
 
 
 def _request_transcription(source: dict, transcribe: object, directory: Path) -> list[dict[str, object]]:
@@ -146,12 +200,13 @@ def _request_transcription(source: dict, transcribe: object, directory: Path) ->
         return _transcription_rows(transcribe(str(snapshot)))
 
 
-def transcribe_project_audio(project_dir: str | Path, provider: object, *, refresh: bool = False) -> int:
+def transcribe_project_audio(project_dir: str | Path, provider: object | None, *, refresh: bool = False, on_progress=None) -> int:
     """Add speech evidence, reusing completed per-recording local receipts.
 
     A later failure leaves the map unchanged but retains earlier receipts for
     retry. Refresh explicitly calls the service again; changed evidence is
     still rejected rather than overwriting existing references.
+    With provider=None, restore unambiguous local receipts only; never upload.
     """
 
     paths = project_paths(project_dir)
@@ -164,8 +219,10 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
     segments = list(data.get("speech_segments", []))
     added = 0
     transcribe = getattr(provider, "transcribe", None)
-    if not callable(transcribe):
+    if provider is not None and not callable(transcribe):
         raise TypeError("speech provider must implement transcribe(audio_path)")
+    if provider is None and refresh:
+        raise ValueError("重新转写需要明确选择语音服务。")
     sources = [source for source in manifest.get("source_manifest", []) if source.get("kind") in {"audio", "video"}]
     # Preflight the whole batch before any paid call, including cache hits.
     for source in sources:
@@ -180,6 +237,7 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
             if old_hash and old_hash != source["sha256"]:
                 raise ValueError(f"{source.get('name', '录音')}与已有转写的文件不同；请在新项目中导入，已有来源未被覆盖。")
     directory = paths["derived"] / "transcriptions"
+    saved = _saved_transcriptions(directory) if provider is None else []
     validate_audio = getattr(provider, "validate_audio", None)
     if callable(validate_audio):
         # Catch a later oversized/unsupported recording before uploading the
@@ -190,9 +248,19 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
                 validate_audio(str(source["path"]))
     for source in sources:
         source_id = str(source.get("source_id") or "")
-        receipt_path, header = _transcription_receipt(source, provider, directory)
-        cached = receipt_path.exists() and not refresh
-        if cached:
+        if provider is None:
+            matches = [(header, rows) for header, rows in saved
+                       if header["source_id"] == source_id and header["source_sha256"] == source["sha256"]]
+            if not matches:
+                continue
+            header, rows = matches[0]
+            if any(candidate != rows for _, candidate in matches[1:]):
+                raise ValueError("这段录音有多份不同的本地转写；请明确选择转写服务和模型以确定来源，尚未上传录音。")
+            receipt_path, cached = _receipt_path(directory, header), True
+        else:
+            receipt_path, header = _transcription_receipt(source, provider, directory)
+            cached = receipt_path.exists() and not refresh
+        if cached and provider is not None:
             try:
                 receipt = read_json(receipt_path)
                 if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in header.items()):
@@ -200,7 +268,9 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
                 rows = _transcription_rows(receipt.get("segments"))
             except (OSError, ValueError, TypeError) as exc:
                 raise ValueError("本地转写记录损坏；可明确选择重新转写，程序未自动上传录音。") from exc
-        else:
+        if on_progress:
+            on_progress(source, cached)
+        if not cached:
             rows = _request_transcription(source, transcribe, directory)
         matched_ids = set()
         for index, row in enumerate(rows, 1):
@@ -221,7 +291,7 @@ def transcribe_project_audio(project_dir: str | Path, provider: object, *, refre
                     raise ValueError(f"{source.get('name', '录音')}第 {index} 段与已有转写不同；请核对转写或在新项目中重新导入，已有来源未被覆盖。")
                 continue
             metadata = annotate_speech_metadata(row.get("metadata"), str(row.get("text", "")))
-            metadata["transcription"] = {"provider": str(getattr(provider, "name", "unknown")),
+            metadata["transcription"] = {"provider": header["provider"]["name"],
                 "provider_segment_id": provider_id, "segment_index": index,
                 "source_sha256": source.get("sha256"), "model": header["provider"]["model"]}
             segment = dict(row)

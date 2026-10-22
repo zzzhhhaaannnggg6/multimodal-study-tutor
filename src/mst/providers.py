@@ -13,8 +13,8 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Protocol
 
-from .speech import (DEFAULT_SPEECH_MODEL, MAX_SPEECH_BYTES, SpeechRequestError,
-                     transcription_request_options, transcription_response)
+from .speech import (DEFAULT_SPEECH_MODEL, SpeechRequestError,
+                     transcription_request_options, transcription_response, validate_audio_file)
 
 
 class TextModelProvider(Protocol):
@@ -119,14 +119,7 @@ class OpenAISpeechProvider:
             self._client = None
 
     def validate_audio(self, audio_path: str) -> None:
-        path = Path(audio_path)
-        if path.suffix.lower() not in {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}:
-            raise SpeechRequestError("这份录音格式暂不支持转写；请另存为 MP3、M4A 或 WAV，或添加 SRT/VTT 转写。")
-        size = path.stat().st_size
-        if not size:
-            raise SpeechRequestError("录音文件为空，请检查文件或添加教师转写；本次未上传。")
-        if size > MAX_SPEECH_BYTES:
-            raise SpeechRequestError("本工具当前每段录音转写上限为 24 MB；请压缩或分段后重新导入，也可添加 SRT/VTT。整批尚未上传。")
+        validate_audio_file(audio_path)
 
     @property
     def client(self) -> Any:

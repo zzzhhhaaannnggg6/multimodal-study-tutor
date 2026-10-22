@@ -109,8 +109,19 @@ Web generation defaults to local processing. A student can explicitly select
 an OpenAI or compatible text endpoint, inspect selected files and the destination,
 and consent for that submission. Only extracted text, page/time locators and
 necessary teaching context are sent. Pending transcript text is excluded. Raw
-recordings and page images stay local; web text generation does not implicitly
-enable speech or vision models. Audio-only imports still need readable text or a transcript.
+recordings and page images are not sent by the text connection. A separate audio
+choice lists recordings and destination and requires its own explicit consent.
+Only those recording bytes are sent to Audio Transcriptions; slides and notes
+are excluded. Audio-only imports need either saved/attached transcripts or this
+explicit transcription choice. Page images are never sent by the web workflow.
+
+Revisions copy validated transcript receipts only for explicitly retained audio,
+checking its hash and remapping source IDs when file order changes. Local mode
+can restore these results without a provider, key, or network call; untranscribed
+recordings remain a reported gap. Ambiguous versions are not merged. New audio
+connections reuse results only for the same endpoint/model/request contract.
+Earlier recordings' completed results survive a later failure, but the lesson
+map and active guide are published only after the corresponding job succeeds.
 
 Web credentials are held only in the current form and worker memory, never
 serialized in jobs, manifests, exports or browser storage. Submission clears
@@ -118,8 +129,10 @@ the form credential; finishing a job releases the provider reference. Restarting
 does not recover a key or resume network calls. Retry requires a fresh explicit
 choice and consent, or a deliberate switch to local mode. Environment keys are
 not read by the web path. Raw service error bodies are not stored or displayed.
-The adapter never follows redirects, never automatically retries and sets
-`store: false`. That flag does not establish a third party's retention policy
+The adapters never follow redirects or automatically retry. The text connection
+sets `store: false`; the speech endpoint receives only its supported fields,
+without claiming that an unsupported flag can control audio retention.
+These choices do not establish a third party's retention policy
 or guarantee zero data retention. Explicit CLI provider selection remains separate.
 
 Users should be able to delete a local project by removing its source and

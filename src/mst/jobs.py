@@ -17,12 +17,13 @@ from typing import Any, Callable
 
 from .export import export_study_guide
 from .guide import StudyGuide, generate_project_guide, validate_study_guide
-from .ingest import SUPPORTED_EXTENSIONS, ingest_project, init_project
+from .ingest import SUPPORTED_EXTENSIONS, copy_transcription_receipts, ingest_project, init_project, transcribe_project_audio
 from .io import active_project_dir, project_paths, read_json, write_json
 from .materials import material_results
 from .profiles import PROFILES
 from .reconstruct import build_scaffold
 from .web_models import GenerationOptions, HTTPTextProvider, ModelRequestError, ModelSession
+from .web_speech import HTTPAudioProvider, SpeechOptions, SpeechSession
 
 
 ACTIVE = {"queued", "running"}
@@ -71,11 +72,18 @@ def decode_uploads(rows: Any) -> list[tuple[str, bytes]]:
     return decoded
 
 
-def run_pipeline(workspace: Path, progress: Callable[[str, str], None], *, provider=None) -> StudyGuide:
+def run_pipeline(workspace: Path, progress: Callable[[str, str], None], *, provider=None, speech=None) -> StudyGuide:
     sources = sorted((workspace / "sources" / "uploads").iterdir())
     progress("inventory", "正在清点所选材料")
     manifest = ingest_project(workspace, sources)
     scaffold = build_scaffold(workspace, render=True, on_progress=progress)
+    media = [row for row in manifest["source_manifest"] if row["kind"] in {"audio", "video"}]
+    if speech and not media:
+        raise ValueError("本次没有所选录音，请添加录音，或关闭录音转写后生成。")
+    if media:
+        transcribe_project_audio(workspace, speech, on_progress=speech.report_recording if speech else
+                                 lambda source, cached: progress("transcribing", f"正在读取本机已有转写：{source['name']}"))
+        scaffold = read_json(project_paths(workspace)["lesson_map"])
     if not any(page.get("text", "").strip() for page in scaffold["pages"]) and not any(segment.get("text", "").strip() for segment in scaffold["speech_segments"]):
         issues = scaffold["notes"].get("extraction_issues", [])
         if issues:
@@ -87,9 +95,16 @@ def run_pipeline(workspace: Path, progress: Callable[[str, str], None], *, provi
         raise ModelRequestError(provider.failure or "模型未生成通过完整性检查的知识点；原讲义未替换。可改选‘本地草稿’核对材料。")
     identity = {"subject": manifest["subject"], "sources": sorted(row["sha256"] for row in manifest["source_manifest"])}
     guide.lesson_id = manifest.get("web_course_id") or "course::" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-    pending_media = [row for row in manifest["source_manifest"] if row["kind"] in {"audio", "video"}]
+    transcribed = {row.get("source_id") for row in scaffold["speech_segments"]}
+    pending_media = [row for row in media if row["source_id"] not in transcribed]
     if pending_media:
-        guide.report.warnings.append("录音已保存在本地，本次未调用语音模型；需要教师转写才能补入录音内容。")
+        guide.report.warnings.append(f"{len(pending_media)} 份录音尚未转写，内容未进入讲义；可添加对应转写，或主动选择录音转写服务。")
+        if guide.report.status == "complete":
+            guide.report.status = "draft"
+    untimed = sum(row.get("source_id") in {source["source_id"] for source in media} and row.get("start") is None
+                  for row in scaffold["speech_segments"])
+    if untimed:
+        guide.report.warnings.append(f"{untimed} 段录音转写没有时间戳，保留为待定位文字，不能精确回听核对。")
         if guide.report.status == "complete":
             guide.report.status = "draft"
     progress("checking", "正在检查例题、练习与来源缺口")
@@ -106,7 +121,7 @@ def run_pipeline(workspace: Path, progress: Callable[[str, str], None], *, provi
 
 
 class JobManager:
-    def __init__(self, project: str | Path, runner: Callable = run_pipeline, *, provider_factory=HTTPTextProvider):
+    def __init__(self, project: str | Path, runner: Callable = run_pipeline, *, provider_factory=HTTPTextProvider, speech_factory=HTTPAudioProvider):
         self.project = Path(project).resolve()
         self.directory = self.project / ".study-jobs"
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -127,6 +142,7 @@ class JobManager:
             raise ValueError("这个课程已在另一个窗口提供服务，请回到原窗口。") from exc
         self.runner = runner
         self.provider_factory = provider_factory
+        self.speech_factory = speech_factory
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.jobs: dict[str, dict] = {}
@@ -158,14 +174,17 @@ class JobManager:
         with self.lock:
             return self.get(max(self.jobs, key=lambda key: self.jobs[key]["created_at"])) if self.jobs else None
 
-    def submit(self, rows: Any, subject: str = "generic", *, generation=None) -> dict:
-        return self._submit(rows, subject, generation=generation)
+    def submit(self, rows: Any, subject: str = "generic", *, generation=None, speech=None) -> dict:
+        return self._submit(rows, subject, generation=generation, speech=speech)
 
-    def _submit(self, rows: Any, subject: str, *, parent: dict | None = None, generation=None) -> dict:
+    def _submit(self, rows: Any, subject: str, *, parent: dict | None = None, generation=None, speech=None, retained_names=None) -> dict:
         options = GenerationOptions.parse(generation)
+        speech_options = SpeechOptions.parse(speech)
         if not isinstance(subject, str) or subject not in PROFILES:
             raise ValueError("请选择可用的学科。")
         decoded = decode_uploads(rows)
+        if speech_options.provider != "none" and not any(SUPPORTED_EXTENSIONS.get(Path(name).suffix.lower()) in {"audio", "video"} for name, _ in decoded):
+            raise ValueError("本次没有所选录音，请添加录音，或关闭录音转写后生成。")
         with self.lock:
             if self.closed.is_set():
                 raise ValueError("服务正在关闭，请稍后重新打开。")
@@ -179,6 +198,7 @@ class JobManager:
             if course_id:
                 manifest["web_course_id"] = course_id
             manifest["generation"] = options.public()
+            manifest["speech"] = speech_options.public()
             write_json(project_paths(workspace)["manifest"], manifest)
             uploads = workspace / "sources" / "uploads"
             uploads.mkdir()
@@ -191,17 +211,19 @@ class JobManager:
                       "created_at": _now(), "updated_at": _now(), "files": files, "history": [], "result_status": None,
                       "parent_job_id": parent["job_id"] if parent else None, "course_id": course_id,
                       "generation": options.public(),
+                      "speech": speech_options.public(),
+                      "retained_sources": {files[index]["stored_name"]: key for index, key in enumerate(retained_names or [])},
                       "materials": material_results(workspace, files)}
             self.jobs[job_id] = record
             self.events[job_id] = threading.Event()
             self._save(record)
-            worker = threading.Thread(target=self._execute, args=(job_id, options), daemon=True, name=f"study-{job_id[:8]}")
+            worker = threading.Thread(target=self._execute, args=(job_id, options, speech_options), daemon=True, name=f"study-{job_id[:8]}")
             self.workers[job_id] = worker
             worker.start()
             return self.get(job_id)
 
-    def _execute(self, job_id: str, options: GenerationOptions) -> None:
-        session = None
+    def _execute(self, job_id: str, options: GenerationOptions, speech_options: SpeechOptions) -> None:
+        session = speech_session = None
         def progress(stage: str, message: str):
             if self.closed.is_set():
                 raise InterruptedError("服务正在关闭，本次生成已中断；材料保留，可以重新生成。")
@@ -215,11 +237,19 @@ class JobManager:
         try:
             progress("preparing", "正在准备独立的课程工作区")
             workspace = self.directory / job_id / "workspace"
+            record = self.jobs[job_id]
+            if record["parent_job_id"] and record["retained_sources"]:
+                ingest_project(workspace, sorted((workspace / "sources" / "uploads").iterdir()))
+                copy_transcription_receipts(self.directory / record["parent_job_id"] / "workspace", workspace, record["retained_sources"])
+            kwargs = {}
             if options.provider != "none":
                 session = ModelSession(self.provider_factory(options), options, progress)
-                guide = self.runner(workspace, progress, provider=session)
-            else:
-                guide = self.runner(workspace, progress)
+                kwargs["provider"] = session
+            if speech_options.provider != "none":
+                names = {item["stored_name"]: item["name"] for item in record["files"]}
+                speech_session = SpeechSession(self.speech_factory(speech_options), speech_options, progress, names)
+                kwargs["speech"] = speech_session
+            guide = self.runner(workspace, progress, **kwargs)
             # Check the saved result, not just a successful return from a model.
             saved = read_json(project_paths(workspace)["study_guide"])
             if saved.get("guide_kind") != "student-study-guide":
@@ -236,6 +266,8 @@ class JobManager:
                 record = self.jobs[job_id]
                 if session:
                     record["generation"]["stats"] = session.stats()
+                if speech_session:
+                    record["speech"]["stats"] = speech_session.stats()
                 record["materials"] = material_results(workspace, record["files"])
                 write_json(self.project / ".study-state.json", {"active_run": job_id, "published_at": _now()})
                 record.update(status="succeeded", stage="done", message="学习讲义已生成" if guide.report.status == "complete" else "材料草稿已生成，内容缺口仍需补全",
@@ -253,33 +285,40 @@ class JobManager:
                 record = self.jobs[job_id]
                 if session:
                     record["generation"]["stats"] = session.stats()
+                if speech_session:
+                    record["speech"]["stats"] = speech_session.stats()
                 record["materials"] = material_results(self.directory / job_id / "workspace", record["files"])
                 message = "课件或转写文件无法打开，请确认文件完整后重新导入。" if isinstance(exc, zipfile.BadZipFile) else str(exc)
-                if options.api_key:
-                    message = message.replace(options.api_key, "[密钥已隐藏]")
+                for key in (options.api_key, speech_options.api_key):
+                    if key:
+                        message = message.replace(key, "[密钥已隐藏]")
                 record.update(status="interrupted" if isinstance(exc, InterruptedError) else "failed", message=message, updated_at=_now())
                 self._save(record)
         finally:
-            if session:
+            for connection in (session, speech_session):
                 try:
-                    session.close()
+                    if connection:
+                        connection.close()
                 except Exception:
                     pass  # A provider's cleanup cannot prevent durable job completion.
             options.api_key = ""
+            speech_options.api_key = ""
             self.events[job_id].set()
             with self.lock:
                 if self.closed.is_set() and not any(job["status"] in ACTIVE for job in self.jobs.values()):
                     self._ownership.close()
 
-    def retry(self, job_id: str, *, generation=None) -> dict:
+    def retry(self, job_id: str, *, generation=None, speech=None) -> dict:
         record = self.get(job_id)
         if not record or record["status"] not in {"failed", "interrupted"}:
             raise ValueError("只有失败或中断的任务可以重新生成。")
         if generation is None and record.get("generation", {}).get("provider", "none") != "none":
             raise ValueError("模型任务重试需要重新选择生成方式并确认发送范围；密钥没有保存。")
-        return self.revise(job_id, [item["stored_name"] for item in record["files"]], [], generation=generation)
+        if speech is None and record.get("speech", {}).get("provider", "none") != "none":
+            raise ValueError("转写任务重试需要重新选择转写方式并确认录音发送范围；密钥没有保存。")
+        return self.revise(job_id, [item["stored_name"] for item in record["files"]], [], generation=generation, speech=speech)
 
-    def revise(self, job_id: str, keep: Any, rows: Any, *, generation=None) -> dict:
+    def revise(self, job_id: str, keep: Any, rows: Any, *, generation=None, speech=None) -> dict:
         """Rebuild a saved import without altering its uploads or published guide."""
         record = self.get(job_id)
         if not record or record["status"] not in TERMINAL:
@@ -318,7 +357,7 @@ class JobManager:
             retained.append({"name": known[key]["name"], "data": base64.b64encode(content).decode()})
         if not record.get("course_id") and record["status"] == "succeeded":
             record["course_id"] = read_json(project_paths(uploads.parent.parent)["study_guide"]).get("lesson_id")
-        return self._submit([*retained, *rows], record["subject"], parent=record, generation=generation)
+        return self._submit([*retained, *rows], record["subject"], parent=record, generation=generation, speech=speech, retained_names=keep)
 
     def active_root(self) -> Path:
         return active_project_dir(self.project)

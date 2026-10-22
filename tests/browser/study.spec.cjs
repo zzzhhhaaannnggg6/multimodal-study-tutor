@@ -457,3 +457,84 @@ test("failed model connection leaves the prior lesson readable and needs new set
   await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
   await expect(page.locator("#generationMode")).toHaveValue("none");
 });
+
+test("student transcribes selected audio with separate consent and reuses it locally after reload", async ({page, request}, testInfo) => {
+  const initial = await (await request.get("/study-guide.json")).json();
+  const posts = [];
+  page.on("request", (req) => { if (req.method() === "POST" && /\/api\/jobs(?:\/|$)/.test(req.url())) posts.push(req); });
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  await expect(page.locator("#speechBox")).toBeHidden();
+  await page.locator("#sourceFiles").setInputFiles([
+    {name:"课件.md", mimeType:"text/markdown", buffer:Buffer.from("# 二进制加法\n二进制 00111 + 00001")},
+    {name:"课堂录音.mp3", mimeType:"audio/mpeg", buffer:Buffer.from("synthetic-browser-audio")}
+  ]);
+  await expect(page.locator("#speechMode")).toHaveValue("none");
+  await expect(page.locator("#generationMode")).toHaveValue("none");
+  await page.locator("#speechMode").selectOption("transcribe");
+  await page.locator("#speechAdvanced > summary").click();
+  await page.locator("#speechProvider").selectOption("compatible");
+  await page.locator("#speechBaseUrl").fill(initial._test_speech_url);
+  await page.locator("#speechApiKey").fill("synthetic-browser-speech-key");
+  await expect(page.locator("#speechFiles")).toHaveText("课堂录音.mp3");
+  await expect(page.locator("#speechDestination")).toContainText(initial._test_speech_url);
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("确认本次录音发送范围");
+  expect(posts).toHaveLength(0);
+  await page.locator("#speechConsent").check();
+  await page.locator("#sourceFiles").setInputFiles({name:"多余录音.mp3", mimeType:"audio/mpeg", buffer:Buffer.from("unselected-audio")});
+  await expect(page.locator("#speechConsent")).not.toBeChecked();
+  await page.getByRole("button", {name:"移除 多余录音.mp3",exact:true}).click();
+  await expect(page.locator("#speechFiles")).not.toContainText("多余录音");
+  await page.locator("#speechConsent").check();
+  await page.screenshot({path:testInfo.outputPath("speech-consent.png"),fullPage:true});
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成",{timeout:15000});
+  await expect(page.locator("#materialResults")).toContainText("转写已读取");
+  await expect(page.locator("#jobStages")).toContainText("录音转写");
+  const first = (await (await request.get("/api/jobs/latest")).json()).job;
+  expect(first.speech.stats.requests).toBe(1);
+  expect(first.materials[1].timed_segment_count).toBe(1);
+  expect(JSON.stringify(first)).not.toContain("synthetic-browser-speech-key");
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain("synthetic-browser-speech-key");
+  await expect(page.locator("#speechApiKey")).toHaveValue("");
+  await expect(page.locator("#speechConsent")).not.toBeChecked();
+  await page.reload();
+  await page.locator("#showMaterials").click();
+  await expect(page.locator("#speechMode")).toHaveValue("none");
+  await expect(page.locator("#speechApiKey")).toHaveValue("");
+  await page.locator("#generateButton").click();
+  await expect.poll(async () => (await (await request.get("/api/jobs/latest")).json()).job.job_id).not.toBe(first.job_id);
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成",{timeout:15000});
+  await expect(page.locator("#materialResults")).toContainText("转写已读取");
+  const second = (await (await request.get("/api/jobs/latest")).json()).job;
+  expect(second.speech.provider).toBe("none");
+  expect(second.materials[1].timed_segment_count).toBe(1);
+  expect(posts).toHaveLength(2);
+  expect(posts[1].postDataJSON().speech).toEqual({provider:"none"});
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+});
+
+test("failed audio service preserves the lesson and needs fresh audio settings", async ({page, request}) => {
+  const initial = await (await request.get("/study-guide.json")).json();
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  await page.locator("#sourceFiles").setInputFiles({name:"课堂录音.mp3",mimeType:"audio/mpeg",buffer:Buffer.from("synthetic-audio")});
+  await page.locator("#speechMode").selectOption("transcribe");
+  await page.locator("#speechAdvanced > summary").click();
+  await page.locator("#speechProvider").selectOption("compatible");
+  await page.locator("#speechBaseUrl").fill(initial._test_speech_url.replace("/v1","/reject"));
+  await page.locator("#speechApiKey").fill("synthetic-rejected-speech-key");
+  await page.locator("#speechConsent").check();
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("密钥无效",{timeout:15000});
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await expect(page.locator("#speechApiKey")).toHaveValue("");
+  await expect(page.locator("#speechConsent")).not.toBeChecked();
+  await expect(page.locator("#retryJob")).toBeHidden();
+  await page.reload();
+  await expect(page.locator("#uploadMessage")).toContainText("密钥无效");
+  await expect(page.locator("#speechMode")).toHaveValue("none");
+});

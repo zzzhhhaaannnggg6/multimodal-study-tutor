@@ -13,6 +13,7 @@ from mst.ingest import ingest_project, init_project, transcribe_project_audio
 from mst.io import project_paths, read_json
 from mst.reconstruct import build_scaffold
 from fake_model_service import FakeModelService
+from fake_speech_service import SpeechService
 
 assert Path(sys.prefix).resolve() in web_directory().resolve().parents, web_directory()
 with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
@@ -54,6 +55,26 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
             assert generated["status"] == "succeeded", generated
             assert generated["generation"]["stats"]["checked_units"] == 1
             assert len(model.requests) == 2
+        with SpeechService() as speech:
+            files = [{"name": "source.md", "data": base64.b64encode("# 进制\n把二进制 101 转换为十进制。".encode()).decode()},
+                     {"name": "synthetic.mp3", "data": base64.b64encode(b"installed-wheel-synthetic-audio").decode()}]
+            def submit(path, value):
+                connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                connection.request("POST", path, json.dumps(value), {"Content-Type": "application/json"})
+                response = connection.getresponse()
+                raw = response.read()
+                assert response.status == 202, raw
+                job = json.loads(raw)["job"]
+                connection.close()
+                assert server.jobs.events[job["job_id"]].wait(10)
+                job = server.jobs.get(job["job_id"])
+                assert job["status"] == "succeeded", job
+                return job
+            audio_job = submit("/api/jobs", {"files": files, "speech": {"provider": "compatible", "base_url": speech.base_url, "model": "whisper-1", "api_key": "", "consent": True}})
+            assert audio_job["speech"]["stats"]["requests"] == 1 and audio_job["materials"][1]["timed_segment_count"] == 1
+            cached = submit(f"/api/jobs/{audio_job['job_id']}/revise", {"keep": [item["stored_name"] for item in audio_job["files"]], "speech": {"provider": "none"}})
+            assert cached["materials"][1]["timed_segment_count"] == 1
+            assert len(speech.requests) == 1 and speech.requests[0]["fields"]["file"] == b"installed-wheel-synthetic-audio"
     finally:
         server.shutdown()
         server.server_close()
@@ -61,6 +82,7 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
 print("Installed wheel: HTML, JavaScript and CSS served outside checkout.")
 print("Installed wheel: saved material revision and extraction receipts verified.")
 print("Installed wheel: explicit model generation verified against loopback-only synthetic API.")
+print("Installed wheel: explicit audio transcription and local-only revision verified without a speech SDK.")
 with tempfile.TemporaryDirectory(prefix="mst-installed-audio-") as directory:
     root = Path(directory)
     project = root / "course"

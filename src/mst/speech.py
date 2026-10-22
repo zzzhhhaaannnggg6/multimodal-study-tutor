@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 
@@ -13,6 +14,17 @@ MAX_SPEECH_BYTES = 24 * 1024 * 1024
 
 class SpeechRequestError(RuntimeError):
     """Safe to display: excludes raw service responses and credentials."""
+
+
+def validate_audio_file(audio_path: str) -> None:
+    path = Path(audio_path)
+    if path.suffix.lower() not in {".flac", ".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".ogg", ".wav", ".webm"}:
+        raise SpeechRequestError("这份录音格式暂不支持转写；请另存为 MP3、M4A 或 WAV，或添加 SRT/VTT 转写。")
+    size = path.stat().st_size
+    if not size:
+        raise SpeechRequestError("录音文件为空，请检查文件或添加教师转写；本次未上传。")
+    if size > MAX_SPEECH_BYTES:
+        raise SpeechRequestError("本工具当前每段录音转写上限为 24 MB；请压缩或分段后重新导入，也可添加 SRT/VTT。整批尚未上传。")
 
 
 def transcription_request_options(model: str) -> dict[str, Any]:
@@ -68,4 +80,4 @@ def transcription_response(response: Any) -> list[dict[str, Any]]:
 
 
 __all__ = ["DEFAULT_SPEECH_MODEL", "MAX_SPEECH_BYTES", "SpeechRequestError",
-           "transcription_request_options", "transcription_response", "transcription_rows"]
+           "transcription_request_options", "transcription_response", "transcription_rows", "validate_audio_file"]

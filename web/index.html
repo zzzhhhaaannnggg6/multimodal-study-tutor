@@ -43,7 +43,7 @@
 
       <section class="upload-box card" id="uploadBox">
         <details id="materialPanel" open><summary>导入或更换课程材料</summary>
-        <div><h2>导入这节课的材料</h2><p>选择或拖入课件和教师转写。默认在本机处理；单独的录音会保留，暂不自动转写。使用模型讲解需要另外选择并确认。</p></div>
+        <div><h2>导入这节课的材料</h2><p>选择或拖入课件、教师转写或录音。默认在本机处理；录音转写和模型讲解分别选择并确认。</p></div>
         <div id="savedMaterials" class="material-receipt" hidden>
           <h3>这次生成使用的材料</h3><p class="muted">“已读取”只说明提取到了文字，不代表讲义已完整。录音内容、图示含义与待确认的页面配对会单独列出。</p>
           <label class="material-mode">接下来要做什么？<select id="inputMode"><option value="revise">补充或修复这次材料</option><option value="new">开始另一节课</option></select></label>
@@ -52,8 +52,25 @@
         </div>
         <div class="upload-controls">
           <label>学科 <select id="subject"><option value="generic">通用课程</option><option value="computer-systems">计算机系统</option><option value="mathematics">数学</option><option value="physics">物理</option><option value="history">历史与社会科学</option><option value="biology">生物</option><option value="chemistry">化学</option><option value="law">法学</option><option value="literature">文学</option></select></label>
-          <label class="source-picker">添加课件或教师转写（可分次选择）<input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /></label>
+          <label class="source-picker">添加课件、教师转写或录音（可分次选择）<input id="sourceFiles" type="file" multiple accept=".pptx,.pdf,.docx,.txt,.md,.srt,.vtt,.mp3,.m4a,.wav,.mp4" /></label>
           <div id="selectedFiles" class="upload-message" aria-live="polite"></div>
+          <fieldset class="generation-settings" id="speechBox" hidden><legend>录音怎么处理？</legend>
+            <label>录音处理<select id="speechMode"><option value="none">只用本机已保存的转写</option><option value="transcribe">转写所选录音</option></select></label>
+            <p class="muted" id="speechLocalHint">已有转写可直接复用；尚未转写的录音只保存在本机，不上传。也可以添加 SRT/VTT、DOCX 或 TXT 转写。</p>
+            <div id="speechSettings" hidden>
+              <p>将下方录音发送到转写服务，结果再与课件配对。已有结果优先复用，失败不自动重发。调用可能收费；本工具单段录音上限为 24 MB。</p>
+              <details id="speechAdvanced"><summary>调整转写服务或模型</summary><div class="model-fields">
+                <label>转写服务<select id="speechProvider"><option value="openai">OpenAI</option><option value="compatible">其他兼容服务或本机转写</option></select></label>
+                <label>转写模型<input id="speechModel" type="text" value="whisper-1" maxlength="160" autocomplete="off" spellcheck="false" /><small>默认请求分段时间戳；其他模型只保留实际返回的时间。</small></label>
+                <label id="speechBaseUrlLabel" hidden>转写服务基础地址<input id="speechBaseUrl" type="url" placeholder="https://api.example.com/v1" maxlength="500" autocomplete="off" spellcheck="false" /><small>兼容 Audio Transcriptions；本机服务也可使用 HTTP。</small></label>
+              </div></details>
+              <label>转写服务的 API 密钥<input id="speechApiKey" type="password" autocomplete="off" spellcheck="false" maxlength="4096" /><small>只用于本次转写，不保存。无认证的本机服务可留空。</small></label>
+              <p id="speechDestination" class="send-destination"></p>
+              <details open><summary id="speechScopeTitle">本次录音</summary><ul id="speechFiles"></ul></details>
+              <p class="muted">这里仅发送列出的录音；课件和笔记不会随录音发送。转写结果不等于教师观点或页面配对已核实。</p>
+              <label class="model-consent"><input id="speechConsent" type="checkbox" />我同意将上述录音发送到所选转写服务，用于本次课程。</label>
+            </div>
+          </fieldset>
           <fieldset class="generation-settings"><legend>怎样生成这节课？</legend>
             <label>生成方式<select id="generationMode"><option value="none">本地草稿</option><option value="model">模型讲解</option></select></label>
             <p class="muted" id="localModeHint">本地草稿可以核对来源，但仍有内容待补，不能当作完整课程。</p>
@@ -67,7 +84,7 @@
               </div>
               <p id="sendDestination" class="send-destination"></p>
               <details><summary id="sendScopeTitle">查看本次材料</summary><ul id="sendFiles"></ul></details>
-              <p class="muted">只发送本次材料提取的文字、页码、已配对转写及必要教学上下文。录音和页面图像留在本机，不自动转写或读图。</p>
+              <p class="muted">本设置只发送所选材料提取的文字、页码、已配对转写及必要教学上下文。页面图像不发送；录音是否上传由上方“录音处理”单独确认。</p>
               <label class="model-consent"><input id="modelConsent" type="checkbox" />我同意将上述文字发送到所选服务，用于本次讲义生成。</label>
             </div>
           </fieldset>

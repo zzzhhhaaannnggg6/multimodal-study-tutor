@@ -1,6 +1,6 @@
 """Exercise the BUILT native WKWebView and frozen backend with synthetic input.
 
-No browser driver, model service, user's workspace, system Python subprocess,
+No browser driver, cloud service, user's workspace, system Python subprocess,
 or accessibility permission is used by the app. Run in a logged-in macOS GUI.
 """
 
@@ -13,9 +13,13 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+from fake_speech_service import SpeechService
 
 
 def pdf_fixture() -> bytes:
@@ -40,6 +44,7 @@ const wait = async (predicate) => { for(let i=0;i<600;i++) { if(await predicate(
 const $ = (id) => document.getElementById(id);
 assert($('generationMode').value === 'none', 'must default to local');
 assert($('modelApiKey').value === '', 'must not restore credentials');
+assert($('speechMode').value === 'none' && $('speechApiKey').value === '', 'must not restore audio upload or credentials');
 """
 
 FIRST = """
@@ -48,14 +53,26 @@ const files = new DataTransfer();
 files.items.add(new File(['# 二进制转十进制\\n将二进制 (1101)2 转换为十进制，按位权展开计算。'], '合成课程.md', {type:'text/markdown'}));
 files.items.add(new File([Uint8Array.from(atob(PDF_BYTES), c=>c.charCodeAt(0))], '合成页面.pdf', {type:'application/pdf'}));
 files.items.add(new File(['# 二进制减法\\nBinary subtraction: 10000-00001'], '合成借位.md', {type:'text/markdown'}));
+files.items.add(new File(['synthetic-native-audio-marker'], '合成录音.mp3', {type:'audio/mpeg'}));
 $('sourceFiles').files=files.files;
 $('sourceFiles').dispatchEvent(new Event('change', {bubbles:true}));
 $('subject').value='computer-systems';
+$('speechMode').value='transcribe'; $('speechMode').dispatchEvent(new Event('input', {bubbles:true}));
+$('speechAdvanced').open=true;
+$('speechProvider').value='compatible'; $('speechProvider').dispatchEvent(new Event('input', {bubbles:true}));
+$('speechBaseUrl').value=SPEECH_URL; $('speechBaseUrl').dispatchEvent(new Event('input', {bubbles:true}));
+$('speechApiKey').value='native-synthetic-speech-key';
+$('generateButton').click();
+await wait(()=>$('uploadMessage').textContent.includes('确认本次录音发送范围'));
+assert(!(await(await fetch('api/jobs/latest')).json()).job, 'unconfirmed audio must not create a job');
+$('speechConsent').checked=true; $('speechConsent').dispatchEvent(new Event('change', {bubbles:true}));
 $('generateButton').click();
 await wait(()=> document.querySelector('#routeCards .unit-card') && $('uploadMessage').textContent.includes('草稿已生成'));
 const job=(await(await fetch('api/jobs/latest')).json()).job;
 assert(job.status==='succeeded', 'generation did not succeed');
-assert(job.materials.length===3, 'missing per-file receipts');
+assert(job.materials.length===4, 'missing per-file receipts');
+assert(job.speech.stats.requests===1 && job.materials.find(x=>x.name.endsWith('.mp3')).timed_segment_count===1, 'native speech request did not preserve time');
+assert($('speechApiKey').value==='' && !$('speechConsent').checked, 'audio credentials or consent retained after submit');
 assert(job.materials.find(x=>x.name.endsWith('.pdf')).status !== 'unreadable', 'PDF must work without system pdftotext');
 const guide=await(await fetch('study-guide.json')).json();
 const numeric=guide.units[0];
@@ -99,7 +116,7 @@ answer.dispatchEvent(new Event('input', {bubbles:true}));
 $('markUnit').click();
 const closing=await window.StudyDesktop.prepareToClose();
 assert(closing.saved && !closing.busy, 'close did not flush the newest answer');
-return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, binary_borrowing:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
+return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, binary_borrowing:true, speech_transcribed:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
 """
 
 SECOND = """
@@ -110,7 +127,16 @@ assert($('progressText').textContent.startsWith('1/'), 'completion not restored'
 assert(!document.querySelector('#lessonContent .practice details[open]'), 'answers should stay folded');
 const job=(await(await fetch('api/jobs/latest')).json()).job;
 assert(job.job_id===OLD_JOB, 'restart must not regenerate');
-return {passed:true, job_id:job.job_id, restored:true};
+$('showMaterials').click();
+assert($('speechMode').value==='none', 'restart must not silently enable audio upload');
+$('generateButton').click();
+await wait(async()=> { const current=(await(await fetch('api/jobs/latest')).json()).job; return current.job_id!==job.job_id && current.status==='succeeded'; });
+const revised=(await(await fetch('api/jobs/latest')).json()).job;
+assert(revised.speech.provider==='none', 'local revision must not require a transcription service');
+assert(revised.materials.find(x=>x.name.endsWith('.mp3')).timed_segment_count===1, 'local revision lost saved speech');
+const restoredGuide=await(await fetch('study-guide.json')).json();
+assert(restoredGuide.generation_report.total_segments===1, 'local revision lost audio source');
+return {passed:true, job_id:job.job_id, restored:true, cached_speech_reused:true, revised_job_id:revised.job_id};
 """
 
 
@@ -129,7 +155,7 @@ def run_check(app: Path, output: Path) -> None:
     results = []
     # Move to a different path for the second launch, modelling replacement of
     # the application while retaining a stable workspace outside its bundle.
-    with tempfile.TemporaryDirectory(prefix="mst-installed-preview-") as isolated:
+    with tempfile.TemporaryDirectory(prefix="mst-installed-preview-") as isolated, SpeechService() as speech:
         for index, body in enumerate((FIRST, SECOND), 1):
             launched_app = app
             if index == 2:
@@ -138,6 +164,7 @@ def run_check(app: Path, output: Path) -> None:
             report = output / f"launch-{index}.json"
             script = output / f"launch-{index}.js"
             source = SETUP + body.replace("PDF_BYTES", json.dumps(base64.b64encode(pdf_fixture()).decode()))
+            source = source.replace("SPEECH_URL", json.dumps(speech.base_url))
             source = source.replace("OLD_JOB", json.dumps(results[0]["job_id"]) if results else "null")
             script.write_text(source, encoding="utf-8")
             child = subprocess.Popen([str(launched_app / "Contents/MacOS/StudyTutor"), "--workspace", str(workspace),
@@ -162,12 +189,16 @@ def run_check(app: Path, output: Path) -> None:
                 raise AssertionError("backend orphaned after native app quit")
             assert (output / f"launch-{index}.png").stat().st_size > 1000
             results.append(result)
+        assert len(speech.requests) == 1, "local retry uploaded completed audio again"
+        assert speech.requests[0]["fields"]["file"] == b"synthetic-native-audio-marker"
+        assert all(b"native-synthetic-speech-key" not in path.read_bytes() for path in workspace.rglob("*") if path.is_file())
     assert "二进制" in (downloads / "study-guide.md").read_text(encoding="utf-8")
     assert not list(downloads.glob(".mst-download-*.partial")), "unfinished native download files"
     with (app / "Contents/Info.plist").open("rb") as handle:
         metadata = plistlib.load(handle)
     summary = {"passed": True, "launches": results, "runtime": runtime, "minimum_macos": metadata["LSMinimumSystemVersion"],
                "system_python_used_by_app": False, "live_model_calls": 0,
+               "synthetic_speech_requests": 1,
                "manual_checks_remaining": ["native file picker", "native download save panel", "Gatekeeper on a downloaded archive", "other macOS versions and architectures"]}
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))

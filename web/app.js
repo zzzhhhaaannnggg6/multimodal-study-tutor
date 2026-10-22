@@ -205,15 +205,37 @@
     restoring = true;
     requestAnimationFrame(() => { window.scrollTo(0, last?.scroll || 0); restoring = false; });
   }
-  const stageOrder = [["inventory","材料处理"],["aligning","页面与讲解配对"],["writing","组织讲义"],["checking","内容检查"],["exporting","保存讲义"]];
+  const stageOrder = [["inventory","材料处理"],["transcribing","录音转写"],["aligning","页面与讲解配对"],["writing","组织讲义"],["checking","内容检查"],["exporting","保存讲义"]];
   function invalidateModelConsent() {
     $("modelConsent").checked = false;
     if ($("generationMode").value === "model") $("uploadMessage").textContent = "材料或模型设置已更改，请重新确认发送范围。";
   }
+  function invalidateSpeechConsent() {
+    $("speechConsent").checked = false;
+    if ($("speechMode").value === "transcribe") $("uploadMessage").textContent = "录音或转写设置已更改，请重新确认录音发送范围。";
+  }
+  function invalidateMaterialConsent() { invalidateModelConsent(); invalidateSpeechConsent(); }
   function updateRetryButton() {
     const job = state.job;
     const untouched = !state.files.length && list(job?.files).every((item) => state.kept.has(item.stored_name));
-    $("retryJob").hidden = !(["failed","interrupted"].includes(job?.status) && (job.generation?.provider || "none") === "none" && $("generationMode").value === "none" && $("inputMode").value === "revise" && untouched);
+    $("retryJob").hidden = !(["failed","interrupted"].includes(job?.status) && (job.generation?.provider || "none") === "none" && (job.speech?.provider || "none") === "none" && $("generationMode").value === "none" && $("speechMode").value === "none" && $("inputMode").value === "revise" && untouched);
+  }
+  function selectedMaterials() {
+    const retained = $("inputMode").value === "revise" ? list(state.job?.files).filter((item) => state.kept.has(item.stored_name)) : [];
+    return [...retained, ...state.files];
+  }
+  function renderSpeechSettings() {
+    const recordings = selectedMaterials().filter((file) => /\.(mp3|m4a|wav|mp4)$/i.test(file.name));
+    $("speechBox").hidden = !recordings.length;
+    if (!recordings.length) { $("speechMode").value = "none"; $("speechApiKey").value = ""; $("speechConsent").checked = false; }
+    const enabled = $("speechMode").value === "transcribe", compatible = $("speechProvider").value === "compatible";
+    const busy = state.submitting || ["queued","running"].includes(state.job?.status);
+    $("speechSettings").hidden = !enabled; $("speechLocalHint").hidden = enabled;
+    $("speechBaseUrlLabel").hidden = !compatible;
+    for (const id of ["speechMode","speechProvider","speechModel","speechBaseUrl","speechApiKey","speechConsent"]) $(id).disabled = busy;
+    $("speechDestination").textContent = `录音发送到：${compatible ? $("speechBaseUrl").value.trim() || "请填写转写服务地址" : "https://api.openai.com/v1"}`;
+    $("speechScopeTitle").textContent = `本次所选录音（${recordings.length} 份）`;
+    $("speechFiles").innerHTML = recordings.map((file) => `<li>${esc(file.name)}</li>`).join("");
   }
   function renderModelSettings() {
     const enabled = $("generationMode").value === "model";
@@ -224,10 +246,10 @@
     $("baseUrlLabel").hidden = !compatible;
     for (const id of ["generationMode","modelProvider","modelName","modelBaseUrl","modelApiKey","modelConsent"]) $(id).disabled = busy;
     $("sendDestination").textContent = `本次发送到：${compatible ? $("modelBaseUrl").value.trim() || "请填写服务地址" : "https://api.openai.com/v1"}`;
-    const retained = $("inputMode").value === "revise" ? list(state.job?.files).filter((item) => state.kept.has(item.stored_name)) : [];
-    const files = [...retained, ...state.files];
+    const files = selectedMaterials();
     $("sendScopeTitle").textContent = `查看本次所选材料（${files.length} 份）`;
-    $("sendFiles").innerHTML = files.length ? files.map((file) => `<li>${esc(file.name)}${/\.(mp3|m4a|wav|mp4)$/i.test(file.name) ? "（录音仅本机保留）" : "（仅提取的文字）"}</li>`).join("") : "<li>尚未选择材料</li>";
+    $("sendFiles").innerHTML = files.length ? files.map((file) => `<li>${esc(file.name)}${/\.(mp3|m4a|wav|mp4)$/i.test(file.name) ? ($("speechMode").value === "transcribe" ? "（录音上传由转写设置单独确认）" : "（录音仅本机保留）") : "（仅提取的文字）"}</li>`).join("") : "<li>尚未选择材料</li>";
+    renderSpeechSettings();
     updateRetryButton();
   }
   function generationOptions() {
@@ -235,6 +257,12 @@
     if (!$("modelConsent").checked) throw new Error("请先确认本次材料发送范围。");
     if (!$("modelName").value.trim()) throw new Error("请填写服务提供的模型名称。");
     return {provider:$("modelProvider").value, model:$("modelName").value.trim(), api_key:$("modelApiKey").value.trim(), base_url:$("modelProvider").value === "compatible" ? $("modelBaseUrl").value.trim() : "", consent:true};
+  }
+  function speechOptions() {
+    if ($("speechMode").value !== "transcribe") return {provider:"none"};
+    if (!$("speechConsent").checked) throw new Error("请先确认本次录音发送范围。");
+    if (!$("speechModel").value.trim()) throw new Error("请填写服务提供的转写模型名称。");
+    return {provider:$("speechProvider").value, model:$("speechModel").value.trim(), api_key:$("speechApiKey").value.trim(), base_url:$("speechProvider").value === "compatible" ? $("speechBaseUrl").value.trim() : "", consent:true};
   }
   function renderMaterials() {
     const job = state.job;
@@ -269,7 +297,7 @@
     $("uploadMessage").textContent = job.message;
     $("jobStages").hidden = false;
     const stages = new Set(list(job.history).map((item) => item.stage));
-    $("jobStages").innerHTML = stageOrder.map(([stage,label]) => `<li class="${stages.has(stage) ? "reached" : ""}">${esc(label)}</li>`).join("");
+    $("jobStages").innerHTML = stageOrder.filter(([stage]) => stage !== "transcribing" || stages.has(stage) || (job.speech?.provider || "none") !== "none").map(([stage,label]) => `<li class="${stages.has(stage) ? "reached" : ""}">${esc(label)}</li>`).join("");
     renderMaterials();
   }
   async function watchJob(job, showResult = true) {
@@ -293,7 +321,8 @@
     try {
       let result;
       const generation = generationOptions();
-      if (retry) { transmitted = true; result = await post(`api/jobs/${state.job.job_id}/retry`, {generation}); }
+      const speech = speechOptions();
+      if (retry) { transmitted = true; result = await post(`api/jobs/${state.job.job_id}/retry`, {generation, speech}); }
       else {
         const revising = !!state.job && $("inputMode").value === "revise";
         if (!state.files.length && (!revising || !state.kept.size)) throw new Error("请至少保留一份材料，或添加课件和教师转写。");
@@ -303,8 +332,8 @@
         })));
         transmitted = true;
         result = revising
-          ? await post(`api/jobs/${state.job.job_id}/revise`, {files, keep: Array.from(state.kept), generation})
-          : await post("api/jobs", {files, subject: $("subject").value, generation});
+          ? await post(`api/jobs/${state.job.job_id}/revise`, {files, keep: Array.from(state.kept), generation, speech})
+          : await post("api/jobs", {files, subject: $("subject").value, generation, speech});
       }
       state.files = []; $("sourceFiles").value = "";
       await watchJob(result.job);
@@ -314,7 +343,7 @@
         $("uploadMessage").textContent = `${error.message} 已有讲义仍保留。`;
         $("generateButton").disabled = false;
       }
-    } finally { if (transmitted) { $("modelApiKey").value = ""; $("modelConsent").checked = false; } state.submitting = false; renderMaterials(); $("retryJob").disabled = false; }
+    } finally { if (transmitted) { $("modelApiKey").value = ""; $("modelConsent").checked = false; $("speechApiKey").value = ""; $("speechConsent").checked = false; } state.submitting = false; renderMaterials(); $("retryJob").disabled = false; }
   }
   function selectFiles(files) {
     if (state.submitting || ["queued","running"].includes(state.job?.status)) return;
@@ -322,7 +351,7 @@
       if (!state.files.some((saved) => saved.name === file.name && saved.size === file.size && saved.lastModified === file.lastModified)) state.files.push(file);
     }
     $("sourceFiles").value = "";
-    invalidateModelConsent();
+    invalidateMaterialConsent();
     renderMaterials();
   }
   async function boot() {
@@ -347,7 +376,7 @@
       if (view) navigate(view.dataset.view);
       if (back) { const index = units().findIndex((item) => item.unit_id === back.dataset.returnUnit); if (index >= 0) navigate("learn", index); }
       const remove = event.target.closest("[data-remove-file]");
-      if (remove) { state.files.splice(Number(remove.dataset.removeFile), 1); invalidateModelConsent(); renderMaterials(); }
+      if (remove) { state.files.splice(Number(remove.dataset.removeFile), 1); invalidateMaterialConsent(); renderMaterials(); }
     });
     document.addEventListener("input", (event) => {
       if (event.target.matches("[data-answer]")) { P.answer(state.progress, state.description, event.target.dataset.answer, event.target.value); save(); }
@@ -362,18 +391,24 @@
     $("resumeLearning").onclick = () => { const last = {...state.progress.reading}; navigate(last.view, Math.max(0, units().findIndex((unit) => unit.unit_id === last.unit_id)), last.scroll); };
     $("guideFile").onchange = async (event) => { const file = event.target.files?.[0]; if (file) try { await loadGuide(JSON.parse(await file.text()), true); } catch (error) { status(error.message,"error"); } };
     $("sourceFiles").onchange = (event) => selectFiles(event.target.files);
-    $("inputMode").onchange = () => { invalidateModelConsent(); renderMaterials(); };
+    $("inputMode").onchange = () => { invalidateMaterialConsent(); renderMaterials(); };
     for (const id of ["generationMode","modelProvider","modelName","modelBaseUrl"]) $(id).addEventListener("input", () => {
       invalidateModelConsent();
       if (id === "generationMode" && $(id).value === "none") $("uploadMessage").textContent = "已选择本地草稿，不会调用模型。";
       if (["modelProvider","modelBaseUrl"].includes(id) || (id === "generationMode" && $(id).value === "none")) $("modelApiKey").value = "";
       renderModelSettings();
     });
+    for (const id of ["speechMode","speechProvider","speechModel","speechBaseUrl"]) $(id).addEventListener("input", () => {
+      invalidateSpeechConsent();
+      if (["speechProvider","speechBaseUrl"].includes(id) || (id === "speechMode" && $(id).value === "none")) $("speechApiKey").value = "";
+      renderModelSettings();
+    });
     $("materialResults").onchange = (event) => {
       const key = event.target.dataset.keep;
-      if (key) { if (event.target.checked) state.kept.add(key); else state.kept.delete(key); invalidateModelConsent(); renderModelSettings(); }
+      if (key) { if (event.target.checked) state.kept.add(key); else state.kept.delete(key); invalidateMaterialConsent(); renderModelSettings(); }
     };
     $("modelConsent").onchange = () => { $("uploadMessage").textContent = $("modelConsent").checked ? "已确认本次发送范围，可开始生成。" : "请确认本次发送范围后再生成。"; };
+    $("speechConsent").onchange = () => { $("uploadMessage").textContent = $("speechConsent").checked ? "已确认录音发送范围；讲解方式可在下方另选。" : "请确认本次录音发送范围后再生成。"; };
     $("showMaterials").onclick = () => { $("materialPanel").open = true; $("uploadBox").scrollIntoView({block:"start"}); $("materialPanel").querySelector("summary").focus({preventScroll:true}); };
     $("generateButton").onclick = () => submit();
     $("retryJob").onclick = () => submit(true);

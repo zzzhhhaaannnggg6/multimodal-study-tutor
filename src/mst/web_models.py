@@ -67,8 +67,8 @@ class GenerationOptions:
             raise ValueError("服务地址不能包含用户名、密钥、查询参数或片段。")
         if parts.scheme != "https" and not (parts.scheme == "http" and loopback):
             raise ValueError("远程模型服务必须使用 HTTPS；本机服务可以使用 HTTP。")
-        if parts.path.endswith(("/responses", "/chat/completions")):
-            raise ValueError("请填写基础地址，不要加 responses 或 chat/completions。")
+        if parts.path.endswith(("/responses", "/chat/completions", "/audio/transcriptions")):
+            raise ValueError("请填写服务基础地址，不要加具体接口路径。")
         if not key and not loopback:
             raise ValueError("请填写该服务的 API 密钥；本次使用后不会保存。")
         if key and (key in base or key in model):
