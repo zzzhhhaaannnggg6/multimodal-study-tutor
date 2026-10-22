@@ -54,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--model", default="gpt-5-mini")
     generate.add_argument("--speech-provider", choices=("none", "openai"), default="none")
     generate.add_argument("--speech-model", default="gpt-4o-transcribe")
+    generate.add_argument("--refresh-transcription", action="store_true", help="explicitly call the speech service again instead of reusing local recordings' transcripts")
     generate.add_argument("--strict", action="store_true", help="fail if the guide is incomplete")
     generate.add_argument("--vision-provider", choices=("none", "openai"), default="none")
     generate.add_argument("--vision-model", default="gpt-5-mini")
@@ -95,7 +96,10 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.command == "generate" and args.refresh_transcription and args.speech_provider == "none":
+        parser.error("--refresh-transcription requires an explicit --speech-provider")
     if args.command == "evaluate":
         from .evaluation import evaluate_suite
         from .io import write_json
@@ -166,8 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.speech_provider == "openai":
             from .providers import OpenAISpeechProvider
 
-            added = transcribe_project_audio(args.project, OpenAISpeechProvider(args.speech_model))
-            print(f"Transcribed {added} audio segment(s)")
+            added = transcribe_project_audio(args.project, OpenAISpeechProvider(args.speech_model), refresh=args.refresh_transcription)
+            print(f"Added {added} audio segment(s); unchanged completed recordings reuse local transcripts")
         if args.vision_provider == "openai":
             from .providers import OpenAIVisionProvider
 

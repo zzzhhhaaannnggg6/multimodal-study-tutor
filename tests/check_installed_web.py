@@ -72,14 +72,22 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-audio-") as directory:
     build_scaffold(project)
     class SyntheticSpeech:
         name = "synthetic-speech"
+        calls = 0
         def transcribe(self, path):
+            self.calls += 1
             return [{"segment_id": "speech::0001", "text": "说明来自 " + Path(path).name, "start": 1, "end": 3}]
-    assert transcribe_project_audio(project, SyntheticSpeech()) == 2
-    assert transcribe_project_audio(project, SyntheticSpeech()) == 0
+    speech = SyntheticSpeech()
+    assert transcribe_project_audio(project, speech) == 2
+    assert speech.calls == 2
+    assert transcribe_project_audio(project, speech) == 0
+    assert speech.calls == 2
+    build_scaffold(project)
+    assert transcribe_project_audio(project, speech) == 2
+    assert speech.calls == 2
     rows = read_json(project_paths(project)["lesson_map"])["speech_segments"]
     assert len({row["segment_id"] for row in rows}) == 2
     assert len({row["source_id"] for row in rows}) == 2
-print("Installed wheel: recording-local synthetic IDs retained both sources without duplicates.")
+print("Installed wheel: both recordings retained; repeat and scaffold rebuild made no additional speech calls.")
 for name in ("number-conversion-v1.json", "number-notation-v1.json"):
     bank = Path(__file__).resolve().parents[1] / "evals" / name
     evaluation = evaluate_suite(bank)

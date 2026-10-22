@@ -69,6 +69,19 @@ notify affected people when appropriate.
 
 ## Retention and deletion
 
+Explicit CLI speech transcription saves per-recording results under
+`derived/transcriptions/`. These receipts contain private transcript text,
+source hashes and provider/model identifiers, but no API keys or original
+absolute file paths. Successful recordings are reused in the same project;
+a later recording's failure does not discard them. Before reuse or upload,
+current recording bytes must match the import manifest. A temporary local
+snapshot is verified before sending and removed when that call exits, including
+service errors. An abrupt process termination can leave a snapshot directory;
+removing the project removes those local copies too. Changing provider/model
+or explicitly refreshing may issue new paid calls. Concurrent CLI runs are
+not coordinated and may both issue a request. This cache does not change the
+web path's default of never uploading audio.
+
 Browser uploads create local copies under `.study-jobs/`; completed and failed
 jobs remain there so users can retry or inspect earlier results.
 Supplementing an import copies only the explicitly retained files and new

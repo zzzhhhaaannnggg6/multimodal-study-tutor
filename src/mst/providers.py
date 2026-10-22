@@ -26,7 +26,12 @@ ModelProvider = TextModelProvider
 
 
 class SpeechProvider(Protocol):
-    """Optional adapter that turns audio into timestamped speech segments."""
+    """Optional adapter that turns audio into timestamped speech segments.
+
+    Results are cached per project/source/name/model. An adapter with additional
+    options may expose ``transcription_cache_key`` to distinguish them; only
+    its digest is persisted. Times, when present, are finite numeric seconds.
+    """
 
     name: str
 

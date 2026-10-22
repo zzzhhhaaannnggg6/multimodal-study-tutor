@@ -1,13 +1,16 @@
-"""Input discovery and source-manifest generation.
+"""Source discovery and explicitly requested speech ingestion.
 
-Ingestion intentionally records metadata only. Original course files remain in
-place and are never rewritten or copied into derived output by this module.
+Discovery records metadata only. Speech requests use verified temporary copies
+and keep local transcript receipts. Original course files are never rewritten.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import mimetypes
+import tempfile
 from pathlib import Path
 from typing import Iterable
 
@@ -110,8 +113,6 @@ def ingest_project(project_dir: str | Path, inputs: Iterable[str | Path]) -> dic
     paths = project_paths(project_dir)
     if not paths["manifest"].exists():
         init_project(project_dir)
-    import json
-
     manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
     rows = discover_sources(inputs)
     manifest["source_manifest"] = rows
@@ -119,8 +120,62 @@ def ingest_project(project_dir: str | Path, inputs: Iterable[str | Path]) -> dic
     return manifest
 
 
-def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
-    """Add provider-generated timestamped segments for local audio/video files."""
+def _transcription_rows(value: object) -> list[dict[str, object]]:
+    """Reject partial/malformed service output instead of caching lost speech."""
+    if not isinstance(value, list) or not value:
+        raise ValueError("转写未返回有效片段；请检查录音或服务后重试，已有来源未被覆盖。")
+    rows = []
+    for index, item in enumerate(value, 1):
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"].strip():
+            raise ValueError(f"转写第 {index} 段缺少有效文字；未保存这份不完整转写。")
+        row = {"text": item["text"], "segment_id": str(item.get("segment_id") or "")}
+        start, end = item.get("start"), item.get("end")
+        if start is not None or end is not None:
+            if (any(isinstance(t, bool) or not isinstance(t, (int, float)) or not math.isfinite(t) or t < 0 for t in (start, end))
+                    or end < start):
+                raise ValueError(f"转写第 {index} 段的起止时间无效；未保存这份不完整转写。")
+            row.update(start=start, end=end)
+        # Page alignment and review status are decided locally. Preserve only
+        # speech fields; provider metadata must not claim human verification.
+        if isinstance(item.get("speaker"), str):
+            row["speaker"] = item["speaker"]
+        rows.append(row)
+    return rows
+
+
+def _transcription_receipt(source: dict, provider: object, directory: Path) -> tuple[Path, dict]:
+    identity = {"name": str(getattr(provider, "name", "unknown")), "model": str(getattr(provider, "model", ""))}
+    # Compatible adapters may distinguish endpoint/options without persisting
+    # credentials or their configuration. Only the digest is stored.
+    options = str(getattr(provider, "transcription_cache_key", ""))
+    identity["options_sha256"] = hashlib.sha256(options.encode()).hexdigest()
+    header = {"schema_version": 1, "source_id": source["source_id"], "source_sha256": source["sha256"], "provider": identity}
+    digest = hashlib.sha256(json.dumps(header, sort_keys=True).encode()).hexdigest()
+    return directory / f"{digest}.json", header
+
+
+def _request_transcription(source: dict, transcribe: object, directory: Path) -> list[dict[str, object]]:
+    """Send a checked local snapshot, even if the original changes mid-call."""
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".transcribing-", dir=directory) as temporary:
+        snapshot = Path(temporary) / Path(source["path"]).name
+        digest = hashlib.sha256()
+        with Path(source["path"]).open("rb") as original, snapshot.open("xb") as copied:
+            for chunk in iter(lambda: original.read(1024 * 1024), b""):
+                digest.update(chunk)
+                copied.write(chunk)
+        if digest.hexdigest() != source["sha256"]:
+            raise ValueError(f"{source.get('name', '录音')}在导入后发生变化；请重新导入，未发送该文件。")
+        return _transcription_rows(transcribe(str(snapshot)))
+
+
+def transcribe_project_audio(project_dir: str | Path, provider: object, *, refresh: bool = False) -> int:
+    """Add speech evidence, reusing completed per-recording local receipts.
+
+    A later failure leaves the map unchanged but retains earlier receipts for
+    retry. Refresh explicitly calls the service again; changed evidence is
+    still rejected rather than overwriting existing references.
+    """
 
     paths = project_paths(project_dir)
     manifest = read_json(paths["manifest"])
@@ -134,19 +189,36 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
     transcribe = getattr(provider, "transcribe", None)
     if not callable(transcribe):
         raise TypeError("speech provider must implement transcribe(audio_path)")
-    for source in manifest.get("source_manifest", []):
-        if source.get("kind") not in {"audio", "video"}:
-            continue
-        source_path = source.get("path")
-        if not source_path:
-            continue
-        source_id = str(source.get("source_id") or "")
-        if not source_id:
-            raise ValueError("录音缺少来源标识，请重新导入材料。")
-        rows = transcribe(str(source_path))
-        for index, row in enumerate(rows, 1):
-            if not isinstance(row, dict):
+    sources = [source for source in manifest.get("source_manifest", []) if source.get("kind") in {"audio", "video"}]
+    # Preflight the whole batch before any paid call, including cache hits.
+    for source in sources:
+        if not source.get("path") or not source.get("source_id") or not source.get("sha256"):
+            raise ValueError("录音缺少来源标识或文件校验信息，请重新导入材料。")
+        if _sha256(Path(source["path"])) != source["sha256"]:
+            raise ValueError(f"{source.get('name', '录音')}在导入后发生变化；请重新导入，未发送录音，已有转写未被覆盖。")
+        for segment in segments:
+            if not isinstance(segment, dict) or segment.get("source_id") != source["source_id"]:
                 continue
+            old_hash = (segment.get("metadata") or {}).get("transcription", {}).get("source_sha256")
+            if old_hash and old_hash != source["sha256"]:
+                raise ValueError(f"{source.get('name', '录音')}与已有转写的文件不同；请在新项目中导入，已有来源未被覆盖。")
+    directory = paths["derived"] / "transcriptions"
+    for source in sources:
+        source_id = str(source.get("source_id") or "")
+        receipt_path, header = _transcription_receipt(source, provider, directory)
+        cached = receipt_path.exists() and not refresh
+        if cached:
+            try:
+                receipt = read_json(receipt_path)
+                if not isinstance(receipt, dict) or any(receipt.get(key) != value for key, value in header.items()):
+                    raise ValueError("receipt identity mismatch")
+                rows = _transcription_rows(receipt.get("segments"))
+            except (OSError, ValueError, TypeError) as exc:
+                raise ValueError("本地转写记录损坏；可明确选择重新转写，程序未自动上传录音。") from exc
+        else:
+            rows = _request_transcription(source, transcribe, directory)
+        matched_ids = set()
+        for index, row in enumerate(rows, 1):
             # Providers often restart numbering for every file. Source and
             # ordinal, rather than that provider-local ID, identify our record.
             segment_id = f"{source_id}::transcription::{index:04d}"
@@ -157,6 +229,7 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
                 if legacy and legacy.get("source_id") == source_id:
                     previous = legacy  # Preserve already referenced legacy IDs.
             if previous is not None:
+                matched_ids.add(previous["segment_id"])
                 old_hash = (previous.get("metadata") or {}).get("transcription", {}).get("source_sha256")
                 if (previous.get("source_id") != source_id or (old_hash and old_hash != source.get("sha256"))
                         or any(previous.get(key) != row.get(key) for key in ("text", "start", "end"))):
@@ -165,7 +238,7 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
             metadata = annotate_speech_metadata(row.get("metadata"), str(row.get("text", "")))
             metadata["transcription"] = {"provider": str(getattr(provider, "name", "unknown")),
                 "provider_segment_id": provider_id, "segment_index": index,
-                "source_sha256": source.get("sha256")}
+                "source_sha256": source.get("sha256"), "model": header["provider"]["model"]}
             segment = dict(row)
             segment.pop("alignment", None)  # A transcriber cannot verify page alignment.
             segment.update(
@@ -180,7 +253,21 @@ def transcribe_project_audio(project_dir: str | Path, provider: object) -> int:
             )
             segments.append(segment)
             existing[segment_id] = segment
+            matched_ids.add(segment_id)
             added += 1
+        for segment in segments:
+            if (isinstance(segment, dict) and segment.get("source_id") == source_id
+                    and segment.get("segment_id") not in matched_ids):
+                raise ValueError(f"{source.get('name', '录音')}比已有转写缺少片段；请核对，已有来源未被覆盖。")
+        # Each recording is durable independently. The lesson map is published
+        # only when the entire batch succeeds, so references never see half a run.
+        if not cached:
+            write_json(receipt_path, {**header, "segments": rows})
+    for source in sources:
+        if _sha256(Path(source["path"])) != source["sha256"]:
+            raise ValueError(f"{source.get('name', '录音')}在处理期间发生变化；已完成的本地转写保留，来源地图未更新，请核对文件。")
+    if not added:
+        return 0
     pages = [VisualFrame.from_dict(item) for item in data.get("pages", data.get("visual_sources", [])) if isinstance(item, dict)]
     aligned = align_speech_to_visuals(pages, [SpeechSegment.from_dict(item) for item in segments if isinstance(item, dict)])
     data["speech_segments"] = [item.to_dict() for item in aligned]
