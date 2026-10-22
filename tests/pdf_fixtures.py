@@ -1,7 +1,7 @@
 """Small synthetic, redistribution-cleared PDFs with independent page markers."""
 
 
-def visual_pdf(count=12, *, text=True, rotate_page=None, crop_page=None, huge_page=None) -> bytes:
+def visual_pdf(count=12, *, text=True, rotate_page=None, crop_page=None, huge_page=None, page_text=None) -> bytes:
     objects = []
     kids = " ".join(f"{4 + 2 * index} 0 R" for index in range(count))
     objects.extend([b"<< /Type /Catalog /Pages 2 0 R >>", f"<< /Type /Pages /Kids [{kids}] /Count {count} >>".encode(),
@@ -15,7 +15,9 @@ def visual_pdf(count=12, *, text=True, rotate_page=None, crop_page=None, huge_pa
         red, green, blue = ((1, 0, 0) if number % 2 else (0, 0, 1))
         content = f"{red} {green} {blue} rg 30 30 240 100 re f\n0 0 0 RG 40 40 m 260 120 l S\n"
         if text:
-            content += f"0 0 0 rg BT /F1 14 Tf 30 160 Td (Synthetic page {number:02d}: E = m c2) Tj ET\n"
+            message = page_text if page_text is not None else f"Synthetic page {number:02d}: E = m c2"
+            message = message.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+            content += f"0 0 0 rg BT /F1 14 Tf 30 160 Td ({message}) Tj ET\n"
         stream = content.encode()
         objects.extend([page.encode(), b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream"])
     result = b"%PDF-1.4\n"

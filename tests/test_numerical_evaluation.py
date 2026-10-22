@@ -19,9 +19,11 @@ from mst.models import LessonMap, VisualFrame
 
 SUITE_PATH = Path(__file__).parents[1] / "evals" / "number-conversion-v1.json"
 SUITE = load_suite(SUITE_PATH)
+NOTATION_PATH = SUITE_PATH.with_name("number-notation-v1.json")
+NOTATION_SUITE = load_suite(NOTATION_PATH)
 
 
-@pytest.mark.parametrize("case", SUITE["cases"], ids=lambda case: case["case_id"])
+@pytest.mark.parametrize("case", [*SUITE["cases"], *NOTATION_SUITE["cases"]], ids=lambda case: case["case_id"])
 def test_public_synthetic_bank_checks_actual_generated_answers(case):
     guide = generate_study_guide(case_map(case))
     result = evaluate_case(case, guide)
@@ -197,3 +199,47 @@ def test_chinese_text_does_not_require_spaces_around_numbers(source):
 
 def test_conflicting_conversion_directions_remain_unresolved():
     assert number_example("Octal to hexadecimal: (635)O = (413)D") is None
+
+
+@pytest.mark.parametrize("profile", ["generic", "mathematics", "physics", "computer-systems"])
+def test_exact_positional_explanation_is_available_across_subjects(profile):
+    source = "将二进制 (1101)2 转换为十进制，按位权展开计算。"
+    lesson = LessonMap(subject=profile, profile=profile, pages=[VisualFrame(visual_id="p1", title="数的表示", text=source, status="covered")])
+    guide = generate_study_guide(lesson)
+    unit = guide.units[0]
+    assert unit.worked_examples[0].complete
+    assert "(13)₁₀" in unit.worked_examples[0].answer
+    assert "(14)₁₀" in next(item.answer for item in unit.practice_items if item.kind == "transfer")
+    assert "PC" not in unit.tutor_bridge + "".join(unit.step_chain)
+    assert unit.source_refs[0].quote == source
+    assert guide.report.status == "draft"  # The course has not been reviewed.
+
+
+@pytest.mark.parametrize("case_id", ["mathematical-minus", "negative-binary-prefix", "minus-outside-parentheses"])
+def test_provider_cannot_promote_a_lost_negative_sign_to_a_complete_answer(case_id):
+    case = next(item for item in NOTATION_SUITE["cases"] if item["case_id"] == case_id)
+    wrong_positive = f"({case['target'].lstrip('-')})₁₀"
+    guide = generate_study_guide(case_map(case), ExistingNumericProvider(wrong_positive))
+    assert guide.report.status == "draft"
+    assert any(field.endswith("numeric_answer_unverified") for field in guide.report.missing_fields)
+    assert not validate_study_guide(guide, strict=True).ok
+
+
+@pytest.mark.parametrize("level", ["guide", "unit"])
+def test_unsupported_case_cannot_pass_evaluation_by_claiming_ready_without_a_complete_example(level):
+    case = next(item for item in NOTATION_SUITE["cases"] if item["case_id"] == "identical-operands-are-an-expression")
+    guide = generate_study_guide(case_map(case))
+    assert not guide.units[0].worked_examples[0].complete
+    if level == "guide":
+        guide.report.status = "complete"
+    else:
+        guide.units[0].status = "ready"
+    assert "unsupported.claims_complete" in evaluate_case(case, guide)["failures"]
+
+
+@pytest.mark.parametrize("expression", [
+    "(101)B + x", "x + (101)B", "(101)B - x", "x - (101)B",
+    "(101)B × x", "x * (101)B", "sqrt((101)B)", "((101)B)²", "-((101)B)",
+])
+def test_unsupported_operations_cannot_be_dropped_around_a_marked_operand(expression):
+    assert number_example("Binary to decimal: " + expression) is None

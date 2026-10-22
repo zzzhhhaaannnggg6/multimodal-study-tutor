@@ -58,7 +58,8 @@ with tempfile.TemporaryDirectory(prefix="mst-installed-") as project:
 print("Installed wheel: HTML, JavaScript and CSS served outside checkout.")
 print("Installed wheel: saved material revision and extraction receipts verified.")
 print("Installed wheel: explicit model generation verified against loopback-only synthetic API.")
-bank = Path(__file__).resolve().parents[1] / "evals" / "number-conversion-v1.json"
-evaluation = evaluate_suite(bank)
-assert evaluation["failed"] == 0, evaluation
-print(f"Installed wheel: {evaluation['passed']}/{evaluation['total']} supplied synthetic numerical cases passed.")
+for name in ("number-conversion-v1.json", "number-notation-v1.json"):
+    bank = Path(__file__).resolve().parents[1] / "evals" / name
+    evaluation = evaluate_suite(bank)
+    assert evaluation["failed"] == 0, evaluation
+    print(f"Installed wheel: {evaluation['suite_id']} {evaluation['passed']}/{evaluation['total']} supplied synthetic numerical cases passed.")

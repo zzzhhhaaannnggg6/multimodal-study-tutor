@@ -9,6 +9,9 @@ Before publishing a project or example:
 - [ ] Run `study evaluate evals/number-conversion-v1.json`; inspect failed cases
       and retain the report. Treat a pass as bounded numerical evidence, not
       as expert review or student independent-learning acceptance.
+- [ ] Run `study evaluate evals/number-notation-v1.json`; preserve mathematical
+      signs, full-width originals and flattened bases. Expressions and extra
+      unresolved literals must not silently turn into a different solved task.
 - [ ] Confirm every core guide unit has a complete worked example with at
       least three steps, a one-condition variation, an error contrast, three
       practice roles (retrieval/process/transfer), and a navigable source

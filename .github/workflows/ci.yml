@@ -86,13 +86,17 @@ jobs:
           fi
 
       - name: Check synthetic numerical teaching answers
-        run: python -m mst.cli evaluate evals/number-conversion-v1.json --output /tmp/mst-numerical-evaluation.json
+        run: |
+          python -m mst.cli evaluate evals/number-conversion-v1.json --output /tmp/mst-numerical-evaluation.json
+          python -m mst.cli evaluate evals/number-notation-v1.json --output /tmp/mst-notation-evaluation.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: numerical-evaluation-python-${{ matrix.python-version }}
-          path: /tmp/mst-numerical-evaluation.json
+          path: |
+            /tmp/mst-numerical-evaluation.json
+            /tmp/mst-notation-evaluation.json
           if-no-files-found: ignore
           retention-days: 14
 

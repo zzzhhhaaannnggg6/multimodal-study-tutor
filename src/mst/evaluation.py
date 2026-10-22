@@ -76,7 +76,7 @@ def evaluate_case(case: dict[str, Any], guide: StudyGuide) -> dict[str, Any]:
         if fragment in text:
             failures.append("source.invented_problem")
     if case["mode"] == "abstain":
-        if any(item.complete for item in examples):
+        if guide.report.status == "complete" or any(unit.status == "ready" for unit in guide.units) or any(item.complete for item in examples):
             failures.append("unsupported.claims_complete")
     elif examples:
         example = examples[0]

@@ -297,11 +297,13 @@ def _material_example(profile: str, text: str) -> dict[str, Any] | None:
     """
 
     compact = " ".join(text.split())
-    if profile != "computer-systems":
-        return None
+    # Positional conversion is the same exact calculation in mathematics and
+    # other subjects; its explicit source facts do not depend on a CPU profile.
     conversion = number_example(text)
     if conversion:
         return conversion
+    if profile != "computer-systems":
+        return None
     instructions = [(_text(row["opcode"]).lower(), tuple(_text(op).lower() for op in row["operands"])) for row in visual_signals(text)["code_candidates"]]
     expected = [("addi", ("r5", "r0", "10")), ("muli", ("r5", "r5", "2")), ("addi", ("r5", "r5", "15"))]
     if "int x = 10" in compact and "2 * x + 15" in compact and any(instructions[i:i + 3] == expected for i in range(len(instructions) - 2)):

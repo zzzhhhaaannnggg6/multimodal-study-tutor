@@ -249,6 +249,31 @@ test("upload completes through real job stages and a bad upload preserves it", a
   await expect(page.locator("#uploadMessage")).toContainText("无法打开");
 });
 
+test("a mathematics student gets the original negative-number explanation and can try its variant", async ({page}, testInfo) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  await page.locator("#subject").selectOption("mathematics");
+  const source = "# 负数与进制转换\nBinary to decimal: -0b101.1";
+  await page.locator("#sourceFiles").setInputFiles({name:"数的表示.md", mimeType:"text/markdown", buffer:Buffer.from(source)});
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
+  await page.locator("#startLearning").click();
+  await expect(page.locator("#lessonContent .grip")).toContainText("(-101.1)₂");
+  const example = page.locator("#lessonContent .example");
+  expect(await example.locator("ol li").count()).toBeGreaterThanOrEqual(3);
+  await expect(example).toContainText("(-5.5)₁₀");
+  await expect(example).toContainText("最前面的负号作用于整个数值");
+  await example.screenshot({path:testInfo.outputPath("numerical-example.png")});
+  await expect(page.locator("#lessonContent .practice details[open]")).toHaveCount(0);
+  const variant = page.locator("#lessonContent .practice").last();
+  await variant.locator("textarea").fill("原数增加 0.5 后为 -5，负号仍保留。");
+  await variant.locator("summary").click();
+  await expect(variant).toContainText("(-5)₁₀");
+  await expect(page.locator("#progressText")).toContainText("0/1");
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+});
+
 test("student can add a transcript, replace one file and reopen saved material receipts", async ({page}, testInfo) => {
   const errors = []; page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
