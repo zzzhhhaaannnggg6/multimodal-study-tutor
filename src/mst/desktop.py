@@ -32,10 +32,14 @@ def configure_bundled_tls() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments and arguments[0] == "--render-pdf":
+        from .pdf_render import main as render_main
+        return render_main(arguments[1:])
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", type=Path, help="Isolated workspace for development checks")
     parser.add_argument("--runtime-check", action="store_true", help="Check bundled PDF reader and verified TLS without network access")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         configure_bundled_tls()
         if args.runtime_check:

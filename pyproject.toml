@@ -22,7 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
-pdf = ["pypdf>=4.0"]
+pdf = ["pypdf>=4.0", "pypdfium2>=5.14.0", "Pillow>=12.1.1"]
 web = ["fastapi>=0.100", "uvicorn>=0.20"]
 dev = ["pytest>=8", "jsonschema>=4"]
 

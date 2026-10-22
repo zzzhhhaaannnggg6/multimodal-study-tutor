@@ -119,3 +119,4 @@ Icon
 *.orig
 .cache/
 .tmp/
+/tmp/

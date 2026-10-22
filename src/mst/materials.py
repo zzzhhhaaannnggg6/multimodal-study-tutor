@@ -27,6 +27,9 @@ def material_results(workspace: Path, files: list[dict]) -> list[dict]:
         pages = [row for row in _records(data.get("pages")) if source_id and row.get("source_id") == source_id and "text" in row]
         speech = [row for row in _records(data.get("speech_segments")) if source_id and row.get("source_id") == source_id and str(row.get("text") or "").strip()]
         text_pages = sum(bool(str(row.get("text") or "").strip()) for row in pages)
+        previews = [{"page": page.get("page"), "image_path": page["image_path"]} for page in pages if page.get("image_path")]
+        rendering = notes.get("rendering") if isinstance(notes.get("rendering"), dict) else {}
+        preview_notes = next((item.get("warnings", []) for item in _records(rendering.get("sources")) if item.get("source_id") == source_id), [])
         timed = sum(row.get("start") is not None and row.get("end") is not None for row in speech)
         statuses = [row["alignment"].get("status") if isinstance(row.get("alignment"), dict) else None for row in speech]
         navigation = statuses.count("navigation")
@@ -35,6 +38,7 @@ def material_results(workspace: Path, files: list[dict]) -> list[dict]:
         row = {"stored_name": file["stored_name"], "name": file["name"], "size_bytes": file["size_bytes"],
                "page_count": len(pages), "text_page_count": text_pages, "segment_count": len(speech),
                "timed_segment_count": timed, "pending_segment_count": pending, "navigation_segment_count": navigation}
+        row.update(rendered_page_count=len(previews), preview_pages=previews, preview_notes=preview_notes)
         if not data:
             status, label, detail, action = "pending", "尚未读取", "文件已保存在本机，尚无可用的读取结果。", "等待处理；若任务已中断，可用保存的材料重试。"
         elif issue:
@@ -52,6 +56,8 @@ def material_results(workspace: Path, files: list[dict]) -> list[dict]:
             action = "页面配对只是候选，不等于已核实教师观点。" if timed == len(speech) else "无时间戳的内容不能定位原录音；可用 SRT/VTT 替换以便回听核对。"
         else:
             status, label, detail, action = "no-text", "未读到文字", "文件已保存，但没有提取到可供学习的内容。", "请检查是否为空文件，或添加可提取文字的课件和教师转写。"
+        if previews:
+            detail += f" 已生成 {len(previews)} 页原页预览，可展开对照；预览不等于已理解图示。"
         row.update(status=status, label=label, detail=detail, action=action)
         results.append(row)
     return results

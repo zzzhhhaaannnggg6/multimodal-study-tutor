@@ -18,6 +18,13 @@ Before publishing a project or example:
       transfer item, and find the source for each central conclusion.
 - [ ] Check Markdown and standalone HTML keep answers collapsed until the
       learner asks to reveal them.
+- [ ] Open exported HTML without the app or network; verify its embedded pages,
+      source-page anchors and answer return links. Missing or oversize pages must stay explicit.
+- [ ] Render a synthetic PDF with distinct pages 1, 2 and 10 without external tools;
+      check rotation, cropping, per-page failures, output bounds and parent shutdown.
+      Compare actual output with an independent renderer and inspect the images.
+- [ ] Check slow previews do not shift reading position; failed scan previews stay
+      accessible without publishing over the saved course. Reject asset/export symlinks outside the course.
 - [ ] Confirm all `E3`/`E-` claims have a quote and a navigable locator.
 - [ ] Inspect pages marked as requiring visual review; confirm diagrams, formulas,
       screenshots and code blocks are either reviewed or visibly left pending.

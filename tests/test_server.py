@@ -51,6 +51,48 @@ def test_http_supplement_uses_explicit_retained_files_and_reports_each_outcome(s
                    {"Origin": "https://example.com"})[0] == 403
 
 
+def test_failed_scan_pages_can_be_previewed_without_publishing_or_exposing_other_files(service):
+    import base64
+    pytest.importorskip("pypdfium2")
+    pytest.importorskip("pypdf")
+    from pdf_fixtures import visual_pdf
+    first = service.jobs.submit(uploads())
+    assert service.jobs.events[first["job_id"]].wait(10)
+    previous = request(service, "GET", "/study-guide.json")[1]
+    job = service.jobs.submit([{"name": "扫描.pdf", "data": base64.b64encode(visual_pdf(2, text=False)).decode()}])
+    assert service.jobs.events[job["job_id"]].wait(10)
+    job = service.jobs.get(job["job_id"])
+    assert job["status"] == "failed" and request(service, "GET", "/study-guide.json")[1] == previous
+    image = job["materials"][0]["preview_pages"][0]["image_path"]
+    route = f"/api/jobs/{job['job_id']}/assets/"
+    from urllib.parse import quote
+    code, png = request(service, "GET", route + quote(image))
+    assert code == 200 and png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert request(service, "GET", route + "derived/lesson-map.json")[0] == 403
+    assert request(service, "GET", f"/api/jobs/{job['job_id']}/guide")[0] == 409
+    assert request(service, "GET", f"/api/exports/html?run={job['job_id']}")[0] == 400
+
+
+@pytest.mark.parametrize("link_root", [False, True])
+def test_preview_route_rejects_symlinks_escaping_the_course(service, tmp_path, link_root):
+    job = service.jobs.submit(uploads())
+    assert service.jobs.events[job["job_id"]].wait(5)
+    root = service.jobs.active_root()
+    rendered = root / "derived/rendered"
+    private = tmp_path / "private.png"
+    private.write_bytes(b"private-outside-course")
+    if link_root:
+        rendered.symlink_to(tmp_path, target_is_directory=True)
+    else:
+        rendered.mkdir(parents=True)
+        (rendered / "private.png").symlink_to(private)
+        (rendered / "other.txt").write_text("not a preview")
+        assert request(service, "GET", "/assets/derived/rendered/other.txt")[0] == 403
+    for prefix in ("/assets/", f"/api/jobs/{job['job_id']}/assets/"):
+        code, body = request(service, "GET", prefix + "derived/rendered/private.png")
+        assert code == 403 and b"private-outside-course" not in body
+
+
 def test_http_upload_disconnect_status_refresh_exports_and_asset_boundary(service):
     assert request(service, "GET", "/study-guide.json")[0] == 404
     code, body = request(service, "POST", "/api/jobs", {"files": uploads(), "subject": "generic"})

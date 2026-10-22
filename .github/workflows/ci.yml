@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           if [[ -f pyproject.toml || -f setup.py || -f setup.cfg ]]; then
-            python -m pip install -e ".[dev]" || python -m pip install -e .
+            python -m pip install -e ".[dev,pdf]"
           fi
           if [[ -f requirements-dev.txt ]]; then
             python -m pip install -r requirements-dev.txt
@@ -105,6 +105,8 @@ jobs:
           /tmp/mst-wheel-check/bin/python -m pip install --no-deps dist/*.whl
           cd /tmp
           /tmp/mst-wheel-check/bin/python "$GITHUB_WORKSPACE/tests/check_installed_web.py"
+          /tmp/mst-wheel-check/bin/python -m pip install 'multimodal-study-tutor[pdf]'
+          /tmp/mst-wheel-check/bin/python "$GITHUB_WORKSPACE/tests/check_installed_pdf.py"
 
   web:
     name: Student browser workflow

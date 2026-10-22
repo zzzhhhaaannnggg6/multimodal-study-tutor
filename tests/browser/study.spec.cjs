@@ -44,6 +44,89 @@ test("refresh resumes reading, preserves draft and keeps answers folded", async 
   expect(errors).toEqual([]);
 });
 
+test("student can compare the actual source page beside its explanation", async ({page}, testInfo) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  const viewer = page.locator("#lessonContent .material-pages");
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator("summary")).toContainText("3 页");
+  const image = () => viewer.locator("figure:not([hidden]) img");
+  await image().scrollIntoViewIfNeeded();
+  await expect.poll(() => image().evaluate((node) => node.naturalWidth)).toBeGreaterThan(0);
+  await expect(viewer.locator("figure:not([hidden]) figcaption")).toContainText("第 1 页");
+  await expect(viewer.locator('[data-page-step="-1"]')).toBeDisabled();
+  await viewer.locator('[data-page-step="1"]').click();
+  await expect(viewer.locator("figure:not([hidden]) figcaption")).toContainText("第 2 页");
+  await viewer.locator('[data-page-step="1"]').click();
+  await expect(viewer.locator("figure:not([hidden]) figcaption")).toContainText("第 10 页");
+  await expect(viewer.locator('[data-page-step="1"]')).toBeDisabled();
+  await expect(viewer.locator("figure:not([hidden]) a")).toHaveAttribute("href", /page-0010\.png$/);
+  await expect(page.locator("#progressText")).toContainText("0/2");
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+  await page.screenshot({path:testInfo.outputPath("material-page.png")});
+  await page.locator("#nextUnit").click();
+  await expect(page.locator("#lessonContent .material-pages")).toHaveCount(0);
+});
+
+test("a missing source image gives an honest readable fallback", async ({page}) => {
+  await page.route("**/assets/derived/rendered/**", (route) => route.fulfill({status:404,contentType:"application/json",body:'{"error":"missing"}'}));
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#startLearning").click();
+  const viewer = page.locator("#lessonContent .material-pages");
+  await viewer.scrollIntoViewIfNeeded();
+  await expect(viewer.locator("figure:not([hidden]) .page-image-error")).toBeVisible();
+  await expect(viewer.locator("figure:not([hidden]) img")).toBeHidden();
+  await expect(page.locator("#lessonContent h2")).toHaveText("从证据到机制");
+});
+
+test("a slowly loaded original page cannot move the student's reading position", async ({page}) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  await page.route("**/assets/derived/rendered/**", async (route) => { await held; await route.continue(); });
+  try {
+    await page.goto("/");
+    await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+    await page.locator("#startLearning").click();
+    const image = page.locator("#lessonContent figure:not([hidden]) img");
+    await image.scrollIntoViewIfNeeded();
+    expect(await image.evaluate((node) => node.naturalWidth)).toBe(0);
+    const heightBefore = await image.evaluate((node) => node.getBoundingClientRect().height);
+    const practice = page.locator("#lessonContent .practice").first();
+    await practice.scrollIntoViewIfNeeded();
+    const before = await practice.evaluate((node) => node.getBoundingClientRect().top);
+    release();
+    await expect.poll(() => image.evaluate((node) => node.naturalWidth)).toBeGreaterThan(0);
+    expect(await image.evaluate((node) => node.getBoundingClientRect().height)).toBe(heightBefore);
+    expect(Math.abs(await practice.evaluate((node) => node.getBoundingClientRect().top) - before)).toBeLessThan(2);
+  } finally { release(); }
+});
+
+test("exported HTML keeps real page images and folded answers without its app", async ({page, request}) => {
+  const response = await request.get("/api/exports/html");
+  expect(response.ok()).toBeTruthy();
+  const document = await response.text();
+  const requests = [];
+  page.on("request", (item) => requests.push(item.url()));
+  // No source asset, app script or local server is available to this document.
+  await page.route("**/*", (route) => route.abort());
+  await page.setContent(document);
+  const image = page.locator(".material-page img").first();
+  await image.scrollIntoViewIfNeeded();
+  await expect.poll(() => image.evaluate((node) => node.naturalWidth)).toBe(1);
+  await expect(image).toHaveAttribute("src", /^data:image\/png;base64,/);
+  await expect(page.locator(".material-page")).toHaveCount(3);
+  await expect(page.locator(".material-page figcaption").last()).toContainText("第 10 页");
+  await expect(page.locator(".practice details[open], .review details[open]")).toHaveCount(0);
+  await page.locator(".review summary").first().click();
+  const back = page.locator(".review details[open] a").first();
+  await back.click();
+  expect(await page.evaluate(() => location.hash)).not.toBe("");
+  expect(requests.filter((url) => !url.startsWith("data:") && !url.startsWith("about:"))).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBeTruthy();
+});
+
 test("closing waits for a slow write and the newer answer before reporting saved", async ({page, request}) => {
   await page.goto("/");
   await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");

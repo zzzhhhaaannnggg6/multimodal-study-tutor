@@ -453,8 +453,12 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
     texts: list[str] = []
     try:
         from pypdf import PdfReader  # type: ignore
+        from pypdf.errors import PyPdfError
 
-        texts = [(page.extract_text() or "").strip() for page in PdfReader(str(source)).pages]
+        try:
+            texts = [(page.extract_text() or "").strip() for page in PdfReader(str(source)).pages]
+        except PyPdfError:
+            raise ValueError("PDF 文字无法读取；文件可能损坏或需要密码，请提供可打开的副本。") from None
     except ImportError:
         try:
             result = subprocess.run(
@@ -462,10 +466,13 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=90,
             )
-        except (FileNotFoundError, subprocess.CalledProcessError):
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return []
         texts = [item.strip() for item in result.stdout.split("\f")]
+        if result.stdout.endswith("\f"):
+            texts.pop()  # Final separator is not another blank source page.
     pages: list[VisualFrame] = []
     for number, text in enumerate(texts, 1):
         first_line = next((line.strip() for line in text.splitlines() if line.strip()), f"Page {number}")
@@ -488,7 +495,7 @@ def extract_pdf_pages(path: str | Path) -> list[VisualFrame]:
                     *domain.get("instruction_tokens", [])[:3],
                     *domain.get("datapath_stages", [])[:5],
                 ],
-                needs_visual_review=True if signals["review_required"] else not bool(text.strip()),
+                needs_visual_review=True,
                 metadata={"visual_analysis": signals},
             )
         )

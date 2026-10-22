@@ -1281,6 +1281,9 @@ def generate_study_guide(
     calculation_conflicts: set[str] = set()
     missing: list[str] = []
     warnings: list[str] = []
+    rendering = lesson.notes.get("rendering", {})
+    if isinstance(rendering, Mapping):
+        warnings.extend(item for item in _list(rendering.get("warnings")) if isinstance(item, str))
     if planning_warning:
         warnings.append(planning_warning)
     if dependency_warning:
@@ -1701,11 +1704,31 @@ def render_markdown(guide: StudyGuide) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def render_html(guide: StudyGuide) -> str:
+def render_html(guide: StudyGuide, *, page_images: Mapping[str, str] | None = None, image_notes: Sequence[str] = ()) -> str:
     """Render a standalone guide while keeping answers collapsed."""
 
     def esc(value: Any) -> str:
         return html.escape(_text(value)).replace("\n", "<br>")
+
+    shown_images: dict[str, str] = {}
+
+    def material_images(refs) -> str:
+        figures = []
+        for ref in refs:
+            if not ref.image_path:
+                continue
+            location = f"第 {ref.page} 页" if ref.page is not None else "材料原页"
+            if ref.image_path in shown_images:
+                figures.append(f'<p><a href="#{shown_images[ref.image_path]}">对照{esc(location)}原图 →</a></p>')
+                continue
+            anchor = f"material-page-{len(shown_images) + 1}"
+            shown_images[ref.image_path] = anchor
+            image = (page_images or {}).get(ref.image_path)
+            if image:
+                figures.append(f'<figure class="material-page" id="{anchor}"><figcaption>对照原页 · {esc(location)}（图示含义仍需核对）</figcaption><img src="{html.escape(image, quote=True)}" alt="{esc(location)}原图" loading="lazy"></figure>')
+            else:
+                figures.append(f'<p class="muted" id="{anchor}">{esc(location)}的图像未嵌入，请回应用查看；这一处图示仍待核对。</p>')
+        return "".join(figures)
 
     body: list[str] = [
         f"<h1>{esc(guide.title)}</h1>",
@@ -1713,6 +1736,8 @@ def render_html(guide: StudyGuide) -> str:
     ]
     if guide.report.status != "complete":
         body.append("<aside class=\"draft\"><strong>教学草稿</strong>：部分内容仍需模型或人工复核。</aside>")
+    if image_notes:
+        body.append('<aside class="draft"><strong>原页预览不完整</strong><ul>' + ''.join(f'<li>{esc(note)}</li>' for note in image_notes) + '</ul></aside>')
     body.extend(
         [
             "<h2>先看学习路线</h2>",
@@ -1730,7 +1755,7 @@ def render_html(guide: StudyGuide) -> str:
                 f"<p class=\"muted\"><strong>需要先会：</strong>{esc('；'.join(unit.prerequisites))}</p>" if unit.prerequisites else "",
                 f"<section><h3>先想 30 秒</h3><p>{esc(unit.question)}</p><p class=\"muted\">先写下你的猜测，再继续阅读。</p></section>",
                 f"<section><h3>为什么要学</h3><p>{esc(unit.why)}</p></section>",
-                f"<section><h3>材料中看什么</h3><p>{esc(unit.material_explanation)}</p></section>",
+                f"<section><h3>材料中看什么</h3><p>{esc(unit.material_explanation)}</p>{material_images(unit.source_refs)}</section>",
                 f"<section class=\"teacher\"><h3>教师补充</h3><p>{esc(unit.teacher_increment)}</p></section>",
                 f"<section class=\"bridge\"><h3>导师补链</h3><p>{esc(unit.tutor_bridge)}</p><ol>" + "".join(f"<li>{esc(step)}</li>" for step in unit.step_chain) + "</ol></section>",
             ]
@@ -1780,9 +1805,10 @@ def render_html(guide: StudyGuide) -> str:
     body.append("<details><summary>展开材料与语音来源索引</summary>")
     for ref in guide.source_index:
         location = f"第 {ref.page} 页" if ref.page is not None else _format_timestamp(ref.start) + " 起" if ref.start is not None else "未精确定位"
-        body.append(f"<details><summary>{esc(ref.label)} · {esc(location)}</summary>" + (f"<p>{esc(ref.note)}</p>" if ref.note else "") + f"<p>{esc(ref.quote)}</p></details>")
+        body.append(f"<details><summary>{esc(ref.label)} · {esc(location)}</summary>" + (f"<p>{esc(ref.note)}</p>" if ref.note else "") + f"<p>{esc(ref.quote)}</p>{material_images([ref])}</details>")
     body.append("</details>")
     css = """body{max-width:850px;margin:40px auto;padding:0 22px;font:16px/1.8 system-ui,-apple-system,'PingFang SC',sans-serif;color:#26352c;background:#fbfcf8}h1{line-height:1.25}h2{margin-top:2.3em;border-bottom:1px solid #dbe5dc;padding-bottom:.35em}h3{margin-top:1.4em;color:#315c43}.lead,.muted{color:#718078}.central{color:#2f6848;font-size:1.1em;font-weight:700}.draft{padding:10px 14px;border-left:4px solid #b28a37;background:#fff7df}.grip{padding:10px 14px;border-left:4px solid #c9684e;background:#fff5ef}.unit{margin-top:36px}.teacher{padding:10px 14px;border:1px solid #c9dfcf;background:#f3f9f4}.bridge{padding:10px 14px;border:1px solid #f0d4c8;background:#fffaf7}.example{padding:14px;border:1px solid #e3d4b5;background:#fffcf4}.mistakes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#dce6dd}.mistakes div{padding:9px;background:white}.mistakes b{color:#718078;font-size:.78em}.practice,.review{margin:10px 0;padding:12px 14px;border:1px solid #dce6dd;border-radius:7px;background:#fff}details{margin-top:8px;padding-top:8px;border-top:1px dashed #dce6dd}summary{color:#2f6848;cursor:pointer;font-weight:700}code{background:#eef3ee;padding:2px 4px}@media(max-width:600px){body{margin:22px auto;padding:0 15px}.mistakes{grid-template-columns:1fr}}"""
+    css += ".material-page{margin:18px 0;padding:10px;border:1px solid #dce6dd;border-radius:7px;background:white}.material-page img{display:block;width:100%;height:auto}.material-page figcaption{color:#718078;font-size:13px;margin-bottom:8px}body{overflow-wrap:anywhere}"
     return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>" + html.escape(guide.title) + f"</title><style>{css}</style></head><body>" + "\n".join(body) + "</body></html>"
 
 

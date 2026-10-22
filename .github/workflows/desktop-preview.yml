@@ -6,8 +6,7 @@ on:
     branches: [main]
     paths:
       - 'desktop/**'
-      - 'src/mst/desktop.py'
-      - 'src/mst/server.py'
+      - 'src/mst/**'
       - 'web/**'
       - '.github/workflows/desktop-preview.yml'
 

@@ -53,6 +53,7 @@
 
 已提供原生 macOS 预览构建：解压后双击「听课助手.app」，直接选择材料并进入学习页面，
 学生运行时不需要安装 Python 或输入命令。课程与学习记录保存在应用之外，重开可继续学习。
+应用内置 PDF 原页预览，讲解旁可翻看课件、放大核对；导出的 HTML 自带已生成原页，可离线对照。
 当前本机构建仅验收 Apple 芯片、macOS 26.0+；尚未完成正式签名、公证与其他平台适配。
 使用方法、构建方式和剩余限制见 [桌面预览](docs/desktop-preview.md)。
 
@@ -93,6 +94,9 @@ macOS 用户装有 Python 3.10+ 后，可双击仓库根目录的 `start-study.c
 
 `quickstart` 和 `build` 默认会尝试把 PPT/PDF 渲染到项目的
 `derived/rendered/`，供来源附录和视觉复核使用；使用 `--no-render` 可关闭。
+开发者安装 `python -m pip install -e '.[pdf]'` 可获得本地 PDF 文字读取与页面渲染，
+不需要另装 Poppler。PPT 完整页面预览仍需要 LibreOffice，或先将课件另存为 PDF。
+仅有图片的扫描页可预览，但没有自动 OCR，不能据此生成完整讲解。
 如果明确选择 `--vision-provider openai`，程序只上传已渲染的页面图像进行结构观察，
 结果仍标为待人工复核，不会自动变成教师观点或已核验公式。
 

@@ -1,5 +1,6 @@
 """Browser test fixture service: synthetic guide, disposable private workspace."""
 import copy
+import base64
 import os
 import signal
 import sys
@@ -18,10 +19,21 @@ with FakeModelService() as model, tempfile.TemporaryDirectory(prefix="mst-browse
     guide = generate_study_guide(LessonMap.from_json(Path(__file__).resolve().parents[1] / "examples/minimal_course/lesson-map.json"))
     guide.lesson_id = "course::" + "a" * 64
     guide.title = "合成测试课程"
+    # Tiny synthetic PNGs keep browser checks independent of PDF extras.
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jkJkAAAAASUVORK5CYII=")
+    for index, number in enumerate((1, 2, 10)):
+        path = Path(directory) / f"derived/rendered/synthetic/page-{number:04d}.png"
+        path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(png)
+        ref = copy.deepcopy(guide.units[0].source_refs[0])
+        ref.ref = f"synthetic::page{number}"
+        ref.kind = "material"; ref.page = number; ref.image_path = str(path.relative_to(directory))
+        guide.units[0].source_refs.append(ref)
+        guide.source_index.append(copy.deepcopy(ref))
     second = copy.deepcopy(guide.units[0])
     second.unit_id = "test::second"
     second.title = "第二个知识点"
     second.prerequisite_ids = [guide.units[0].unit_id]
+    second.source_refs = [ref for ref in second.source_refs if not ref.image_path]
     for index, practice in enumerate(second.practice_items):
         practice.unit_id = second.unit_id
         practice.practice_id = f"second::{index}"

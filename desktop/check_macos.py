@@ -58,8 +58,19 @@ assert(job.materials.length===2, 'missing per-file receipts');
 assert(job.materials.find(x=>x.name.endsWith('.pdf')).status !== 'unreadable', 'PDF must work without system pdftotext');
 const guide=await(await fetch('study-guide.json')).json();
 assert(guide.source_index.some(x=>(x.quote||'').includes('Synthetic PDF evidence')), 'bundled pypdf did not extract actual PDF text');
+const pdfReceipt=job.materials.find(x=>x.name.endsWith('.pdf'));
+assert(pdfReceipt.rendered_page_count===1, 'bundled PDF renderer did not produce the page');
+document.querySelector('#routeCards [data-unit="1"]').click();
+const pageImage=document.querySelector('#lessonContent [data-material-image]');
+assert(pageImage, 'source page missing beside explanation');
+pageImage.scrollIntoView();
+await wait(()=>pageImage.complete && pageImage.naturalWidth>0);
+assert(pageImage.naturalWidth>500, 'PDF preview is not a full page');
 for(const format of ['html','md','json']) {
-  const response=await fetch('api/exports/'+format); assert(response.ok && (await response.text()).length>100, 'export '+format);
+  const response=await fetch('api/exports/'+format);
+  const content=await response.text();
+  assert(response.ok && content.length>100, 'export '+format);
+  if(format==='html') assert(content.includes('src="data:image/png;base64,'), 'HTML must carry its source page offline');
 }
 for(const count of [1,2]) {
   document.querySelector('a[data-export="md"]').click();
@@ -73,7 +84,7 @@ answer.dispatchEvent(new Event('input', {bubbles:true}));
 $('markUnit').click();
 const closing=await window.StudyDesktop.prepareToClose();
 assert(closing.saved && !closing.busy, 'close did not flush the newest answer');
-return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, exports:['html','md','json'], native_downloads:2, answer_saved:true};
+return {passed:true, job_id:job.job_id, title:guide.title, units:guide.units.length, rendered_pdf_pages:pdfReceipt.rendered_page_count, inline_page_preview:true, exports:['html','md','json'], native_downloads:2, answer_saved:true};
 """
 
 SECOND = """

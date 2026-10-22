@@ -84,9 +84,10 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                 raise ValueError("请求格式无效。")
             return value
 
-        def result_root(self, run_id):
+        def result_root(self, run_id, *, for_assets=False):
             job = jobs.get(run_id) if isinstance(run_id, str) and re.fullmatch(r"[0-9a-f]{32}", run_id) else None
-            if not job or job["status"] != "succeeded":
+            allowed = {"succeeded", "failed", "interrupted"} if for_assets else {"succeeded"}
+            if not job or job["status"] not in allowed:
                 raise ValueError("这次讲义尚未生成成功。")
             root = (jobs.directory / run_id / "workspace").resolve()
             if not root.is_relative_to(jobs.directory.resolve()):
@@ -141,11 +142,13 @@ def create_server(project_dir: str | Path, host: str = "127.0.0.1", port: int = 
                 elif route.startswith("/assets/") or re.fullmatch(r"/api/jobs/[0-9a-f]{32}/assets/.+", route):
                     if route.startswith("/api/jobs/"):
                         _, _, _, run_id, _, relative = route.split("/", 5)
-                        root = self.result_root(run_id)
+                        root = self.result_root(run_id, for_assets=True)
                     else:
                         root, relative = jobs.active_root(), route[len("/assets/"):]
                     target = (root / relative).resolve()
-                    if not target.is_relative_to((root / "derived" / "rendered").resolve()):
+                    rendered = (root / "derived" / "rendered").resolve()
+                    if (not rendered.is_relative_to(root.resolve()) or not target.is_relative_to(rendered)
+                            or target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}):
                         raise PermissionError("只能查看当前课程的渲染页面。")
                     self.send_payload(target.read_bytes(), {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(target.suffix, "application/octet-stream"))
                 elif route in {"/", "/index.html", "/app.js", "/progress.js", "/styles.css"}:

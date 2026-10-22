@@ -67,6 +67,7 @@ def build(destination: Path) -> Path:
             shutil.copy2(ROOT / "web" / name, bundled_web / name)
         run(sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir",
             "--name", "study-backend", "--paths", ROOT / "src", "--hidden-import", "pypdf", "--hidden-import", "certifi",
+            "--collect-all", "pypdfium2_raw", "--hidden-import", "pypdfium2", "--hidden-import", "PIL.Image",
             "--add-data", f"{bundled_web}:web", "--distpath", stage / "frozen",
             "--workpath", stage / "pyinstaller", "--specpath", stage, ROOT / "desktop/backend.py")
         shutil.move(stage / "frozen/study-backend", resources / "backend")

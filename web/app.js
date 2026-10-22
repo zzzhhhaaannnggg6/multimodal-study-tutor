@@ -92,11 +92,27 @@
     const fraction = Math.round((seconds - whole) * 1000);
     return [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60].map((part) => String(part).padStart(2, "0")).join(":") + (fraction ? `.${String(fraction).padStart(3,"0").replace(/0+$/,"")}` : "");
   }
+  function pageImageURL(source, runId = state.guide._local_run_id, local = state.localGuide) {
+    if (local || typeof source.image_path !== "string") return null;
+    const parts = source.image_path.split("/");
+    if (parts[0] !== "derived" || parts[1] !== "rendered" || parts.some((part) => !part || part === "." || part === ".." || part.includes("\\"))) return null;
+    const prefix = runId ? `/api/jobs/${encodeURIComponent(runId)}/assets/` : "/assets/";
+    return prefix + parts.map(encodeURIComponent).join("/");
+  }
+  function materialFigures(rows, runId = state.guide._local_run_id, local = state.localGuide, opened = true) {
+    const seen = new Set();
+    const pages = list(rows).map((source) => ({...source, url:pageImageURL(source, runId, local)})).filter((source) => {
+      if (!source.url || seen.has(source.url)) return false;
+      seen.add(source.url); return true;
+    });
+    if (!pages.length) return "";
+    return `<details class="material-pages" ${opened ? "open" : ""}><summary>对照课件原页（${pages.length} 页）</summary><p class="small-note">这里显示原页；图示含义仍需结合讲解核对。</p><div class="page-controls"><button class="secondary-button" type="button" data-page-step="-1" disabled>上一页课件</button><output aria-live="polite">1 / ${pages.length}</output><button class="secondary-button" type="button" data-page-step="1" ${pages.length < 2 ? "disabled" : ""}>下一页课件</button></div>${pages.map((source, index) => `<figure data-material-page ${index ? "hidden" : ""}><figcaption>${esc(source.label || "课件原页")} · 第 ${esc(source.page)} 页 <a href="${source.url}" target="_blank" rel="noopener">放大本页</a></figcaption><img data-material-image src="${source.url}" alt="课件第 ${esc(source.page)} 页原图" loading="lazy" /><p class="page-image-error" hidden>这页图像暂时无法打开。可重新导入课件，或先结合文字学习并保留这一处待核对。</p></figure>`).join("")}</details>`;
+  }
   function sources(rows) {
     return rows.length ? `<ul>${rows.map((source) => {
       const location = source.page != null ? `第 ${source.page} 页` : source.start != null ? `${timestamp(source.start)}${source.end != null ? `–${timestamp(source.end)}` : " 起（结束未标注）"}` : "待定位";
-      const prefix = state.guide._local_run_id ? `/api/jobs/${encodeURIComponent(state.guide._local_run_id)}/assets/` : "/assets/";
-      const image = source.image_path && !state.localGuide ? `<small><a href="${prefix}${String(source.image_path).split("/").map(encodeURIComponent).join("/")}" target="_blank" rel="noopener">查看页面图像</a></small>` : "";
+      const url = pageImageURL(source);
+      const image = url ? `<small><a href="${url}" target="_blank" rel="noopener">查看页面图像</a></small>` : "";
       return `<li><span class="source-label">${esc(source.label || "材料依据")}</span>${esc(location)}${image}${source.note ? `<small>${lines(source.note)}</small>` : ""}${source.quote ? `<small>${lines(source.quote)}</small>` : ""}</li>`;
     }).join("")}</ul>` : '<p class="muted">暂无可定位来源。</p>';
   }
@@ -132,7 +148,7 @@
     const unit = active();
     $("unitNav").innerHTML = units().map((item, index) => `<button class="nav-item ${index === state.index ? "is-active" : ""} ${done(item) ? "is-done" : ""}" data-unit="${index}" type="button"><span>${done(item) ? "✓" : index + 1}</span>${esc(item.title)}</button>`).join("");
     if (!unit) { $("lessonContent").innerHTML = '<p class="empty">导入材料后，这里会显示精讲。</p>'; return; }
-    const section = (title, body, className = "") => `<section class="lesson-section ${className}"><h3>${title}</h3>${body}</section>`;
+    const section = (title, body, className = "") => `<section class="lesson-section ${className}"><h3>${title}</h3>${body}${title === "材料中看什么" ? materialFigures(unit.source_refs) : ""}</section>`;
     const examples = list(unit.worked_examples).map((example) => section(example.complete ? "完整例题" : "例题待补充", `<p class="question"><b>题目：</b>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><b>答案：</b>${lines(example.answer)}</p><p class="variation"><b>换一个条件：</b>${lines(example.variation)}</p>`, "example")).join("");
     const mistakes = list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("");
     $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.index + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label)}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="predict-box"><h3>先想一想</h3><p>${lines(unit.question)}</p><details><summary>需要提示时再打开</summary><p>${lines(list(unit.step_chain)[0])}</p></details></section>${section("为什么要学", `<p>${lines(unit.why)}</p><p class="small-note">先修：${list(unit.prerequisites).map(esc).join("；") || "材料尚未列明"}</p>`)}${section("材料中看什么", `<p>${lines(unit.material_explanation)}</p>`)}${section("教师补充", `<p>${lines(unit.teacher_increment)}</p>`, "teacher")}${section("导师补链：把逻辑补完整", `<p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol>`, "bridge")}${examples}${mistakes ? section("最容易错在哪里", `<div class="mistake-table">${mistakes}</div>`) : ""}${section("现在自己回答", list(unit.practice_items).map((item, i) => practice({...item, unit_id: unit.unit_id}, i)).join("") || "<p>练习仍待补充。</p>")}<div class="unit-footer"><span>评价信息：${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><div class="finish-box"><button class="secondary-button" id="markUnit" type="button">${done(unit) ? "撤销完成标记" : "我完成了这个知识点"}</button><span class="muted">翻到下一页不会自动标为完成。</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${sources(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" ${state.index === 0 ? "disabled" : ""} type="button">← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.index === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
@@ -222,6 +238,10 @@
     $("retainHint").hidden = !revising;
     $("generateButton").textContent = revising ? "用保留和新增的材料重新生成" : "生成我的自学讲义";
     $("materialResults").innerHTML = list(job?.materials).map((item) => `<li data-material="${esc(item.stored_name)}"><label class="material-name">${revising ? `<input type="checkbox" data-keep="${esc(item.stored_name)}" ${state.kept.has(item.stored_name) ? "checked" : ""} ${busy ? "disabled" : ""} />` : ""}<strong>${esc(item.name)}</strong><span class="material-label" data-status="${esc(item.status)}">${esc(item.label)}</span></label><p>${esc(item.detail)}</p><p class="material-action">${esc(item.action)}</p></li>`).join("");
+    list(job?.materials).forEach((item, index) => {
+      const row = $("materialResults").children[index];
+      row.insertAdjacentHTML("beforeend", list(item.preview_notes).map((note) => `<p class="material-action">${esc(note)}</p>`).join("") + materialFigures(item.preview_pages, job.job_id, false, false));
+    });
     $("selectedFiles").innerHTML = state.files.length ? `<p>待加入的文件（${state.files.length} 个）：</p><ul class="pending-files">${state.files.map((file, index) => `<li><span>${esc(file.name)}</span><button class="link-button" type="button" data-remove-file="${index}" ${busy ? "disabled" : ""}>移除<span class="sr-only"> ${esc(file.name)}</span></button></li>`).join("")}</ul>` : "";
     renderModelSettings();
   }
@@ -296,6 +316,18 @@
   }
   async function boot() {
     document.addEventListener("click", (event) => {
+      const pageButton = event.target.closest("[data-page-step]");
+      if (pageButton) {
+        const panel = pageButton.closest(".material-pages");
+        const pages = Array.from(panel.querySelectorAll("[data-material-page]"));
+        const current = Math.max(0, pages.findIndex((page) => !page.hidden));
+        const next = Math.max(0, Math.min(pages.length - 1, current + Number(pageButton.dataset.pageStep)));
+        pages.forEach((page, index) => { page.hidden = index !== next; });
+        panel.querySelector("output").textContent = `${next + 1} / ${pages.length}`;
+        panel.querySelector('[data-page-step="-1"]').disabled = next === 0;
+        panel.querySelector('[data-page-step="1"]').disabled = next === pages.length - 1;
+        return;
+      }
       const unit = event.target.closest("[data-unit]");
       const view = event.target.closest("[data-view]");
       const back = event.target.closest("[data-return-unit]");
@@ -308,6 +340,12 @@
     document.addEventListener("input", (event) => {
       if (event.target.matches("[data-answer]")) { P.answer(state.progress, state.description, event.target.dataset.answer, event.target.value); save(); }
     });
+    document.addEventListener("error", (event) => {
+      if (event.target.matches?.("[data-material-image]")) {
+        event.target.hidden = true;
+        event.target.closest("figure").querySelector(".page-image-error").hidden = false;
+      }
+    }, true);
     $("startLearning").onclick = () => navigate("learn", 0);
     $("resumeLearning").onclick = () => { const last = {...state.progress.reading}; navigate(last.view, Math.max(0, units().findIndex((unit) => unit.unit_id === last.unit_id)), last.scroll); };
     $("guideFile").onchange = async (event) => { const file = event.target.files?.[0]; if (file) try { await loadGuide(JSON.parse(await file.text()), true); } catch (error) { status(error.message,"error"); } };

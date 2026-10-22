@@ -13,6 +13,10 @@ from .alignment import align_speech_to_visuals
 from .render import render_visual_source
 from .io import project_paths, read_json, write_json
 from .extract import extract_manifest_sources
+from .models import VisualFrame
+
+MAX_PREVIEW_PAGES_PER_RUN = 500
+MAX_PREVIEW_BYTES_PER_RUN = 256 * 1024 * 1024
 
 
 def inspect_project_visuals(project_dir: str | Path, provider: Any) -> int:
@@ -81,26 +85,43 @@ def build_scaffold(project_dir: str | Path, *, render: bool = False, on_progress
     progress("aligning", "正在核对页面与教师讲解的关系")
     extracted_segments = align_speech_to_visuals(extracted_pages, extracted_segments)
     render_notes: list[str] = []
+    render_sources: list[dict] = []
     rendered_count = 0
+    rendered_bytes = 0
     if render:
         for source in visuals:
             progress("rendering", f"正在准备页面图像：{source.get('name', '课程材料')}")
             source_path = source.get("path")
             source_id = str(source.get("source_id", "source"))
-            if not source_path:
+            if not source_path or Path(source_path).suffix.lower() not in {".pdf", ".pptx", ".ppt"}:
                 continue
-            result = render_visual_source(source_path, paths["rendered"] / source_id)
+            pages_left = MAX_PREVIEW_PAGES_PER_RUN - rendered_count
+            bytes_left = MAX_PREVIEW_BYTES_PER_RUN - rendered_bytes
+            if pages_left <= 0 or bytes_left <= 0:
+                warning = "本次材料的页面预览已达上限，部分文件尚无图像；可按章节拆分后导入。"
+                render_notes.append(warning)
+                render_sources.append({"source_id": source_id, "renderer": "none", "warnings": [warning], "rendered_pages": 0})
+                continue
+            result = render_visual_source(source_path, paths["rendered"] / source_id,
+                                          page_limit=min(200, pages_left), byte_limit=min(160 * 1024 * 1024, bytes_left))
             render_notes.extend(result.warnings)
             rendered_count += len(result.images)
+            rendered_bytes += sum(image.stat().st_size for image in result.images)
+            render_sources.append({"source_id": source_id, "renderer": result.renderer, "total_pages": result.total_pages,
+                                   "rendered_pages": len(result.images), "warnings": result.warnings})
             by_page = {
                 int(item.page): item
                 for item in extracted_pages
                 if item.source_id == source_id and str(item.page).isdigit()
             }
-            for index, image in enumerate(result.images, 1):
+            for index, image in result.page_images.items():
                 page = by_page.get(index)
                 if page is None:
-                    continue
+                    # A rendered scan remains a visible source, even when its
+                    # text layer is missing. Never invent OCR or teaching text.
+                    page = VisualFrame(visual_id=f"{source_id}::p{index:03d}", source_id=source_id, page=index,
+                                       title=f"第 {index} 页（文字待读取）", text="", status="unresolved", needs_visual_review=True)
+                    extracted_pages.append(page)
                 page.image_path = str(image.relative_to(paths["root"].resolve()))
                 page.metadata = dict(page.metadata or {})
                 page.metadata["rendered_image"] = page.image_path
@@ -145,6 +166,7 @@ def build_scaffold(project_dir: str | Path, *, render: bool = False, on_progress
                 "enabled": render,
                 "rendered_pages": rendered_count,
                 "warnings": render_notes,
+                "sources": render_sources,
             },
         },
     }
