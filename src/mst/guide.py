@@ -639,6 +639,7 @@ class LearningUnit:
     internal_understanding_level: str = "U1"
     internal_assessment_level: str = "E0"
     prerequisite_ids: list[str] = field(default_factory=list)
+    content_mode: str = "lesson"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -661,6 +662,7 @@ class LearningUnit:
             "assessment_signal": self.assessment_signal,
             "source_refs": [item.to_dict() for item in self.source_refs],
             "status": self.status,
+            "content_mode": self.content_mode,
             "internal_understanding_level": self.internal_understanding_level,
             "internal_assessment_level": self.internal_assessment_level,
         }
@@ -687,6 +689,7 @@ class LearningUnit:
             assessment_signal=_text(value.get("assessment_signal"), "尚未观察到评价信号"),
             source_refs=[GuideSourceRef.from_dict(item) for item in _list(value.get("source_refs")) if isinstance(item, Mapping)],
             status=_text(value.get("status"), "draft"),
+            content_mode=_text(value.get("content_mode"), "lesson"),
             internal_understanding_level=_text(value.get("internal_understanding_level"), "U1"),
             internal_assessment_level=_text(value.get("internal_assessment_level"), "E0"),
         )
@@ -1235,6 +1238,8 @@ def _enrich_with_provider(unit: LearningUnit, provider: Any, context: str) -> tu
     if unknown_refs:
         warnings.append("模型引用了未提供的来源，已移除；相关讲解需要复核")
     enriched.status = "ready"
+    if data.get("material_explanation") and any(data.get(key) for key in ("tutor_bridge", "step_chain", "worked_examples")):
+        enriched.content_mode = "lesson"
     return enriched, "；".join(warnings) or None
 
 
@@ -1386,6 +1391,22 @@ def generate_study_guide(
             internal_understanding_level=source_unit.understanding_level,
             internal_assessment_level=source_unit.exam_evidence_level,
         )
+        if not derived_example:
+            # Extracted material is useful, but generic reading actions are not
+            # a lesson or an answered exercise. Keep the full source available
+            # without sending students through invented teaching scaffolds.
+            unit.content_mode = "material-only"
+            unit.one_sentence = "材料已整理；具体讲解、例题和练习待补充。"
+            unit.why = ""
+            unit.material_explanation = "\n\n".join(
+                (f"第 {page.page} 页\n" if page.page is not None else "") + _text(page.text)
+                for page in unit_pages if _text(page.text)
+            ) or "尚未提取出页面文字，可先对照原页。"
+            unit.tutor_bridge = ""
+            unit.step_chain = _split_chain(source_unit.logic_chain)
+            unit.worked_examples = []
+            unit.misconceptions = []
+            unit.practice_items = []
         warning = None
         if provider is not None:
             # Send every source paragraph, not the short preview used by the
@@ -1458,7 +1479,8 @@ def generate_study_guide(
             ref.status = "pending"
             ref.verified = False
             ref.note = "材料标注与位权计算结果冲突；原文与计算过程均已保留，需核对原页或转写。"
-    outcomes = plan.outcomes if plan and plan.method == "model" else [item.one_sentence for item in units[:4]]
+    taught_units = [item for item in units if item.content_mode == "lesson"]
+    outcomes = plan.outcomes if plan and plan.method == "model" and taught_units else [item.one_sentence for item in taught_units[:4]]
     chain = plan.spine if plan and plan.method == "model" else [item.title for item in units] if len(units) <= 7 else []
     first_question = units[0].question if units else "这节课要把哪些材料变成可以使用的知识？"
     central_question = plan.central_question if plan and plan.method == "model" else _text(lesson.theme, first_question)
@@ -1469,7 +1491,7 @@ def generate_study_guide(
         outcomes=outcomes,
         prerequisites=plan.prerequisites if plan and plan.method == "model" else list(dict.fromkeys(item for unit in units for item in unit.prerequisites if item not in unit_titles.values())),
         chain=chain,
-        estimated_minutes=max(10, min(120, len(units) * 10)),
+        estimated_minutes=max(10, min(120, len(taught_units) * 10)) if taught_units else 0,
     )
     review_items = [item for unit in units for item in unit.practice_items]
     aligned = sum(1 for item in segments if item.alignment and item.alignment.status in {"aligned", "covered", "verified"})
@@ -1562,6 +1584,10 @@ def validate_study_guide(value: StudyGuide | Mapping[str, Any] | str | Path, *, 
         report.diagnostics.append(GuideDiagnostic("error", "dependency.invalid", "$.units", str(exc)))
     for index, unit in enumerate(guide.units):
         path = f"$.units[{index}]"
+        if unit.content_mode not in {"lesson", "material-only"}:
+            report.diagnostics.append(GuideDiagnostic("error", "unit.content_mode", f"{path}.content_mode", "知识单元的内容类型无效"))
+        if unit.content_mode == "material-only":
+            report.diagnostics.append(GuideDiagnostic("error", "unit.material_only", path, "只整理了材料，尚未补齐可独立学习的讲解"))
         for name in ("question", "one_sentence", "why", "step_chain", "worked_examples", "practice_items", "source_refs"):
             if not getattr(unit, name):
                 report.diagnostics.append(GuideDiagnostic("error", "unit.incomplete", f"{path}.{name}", "核心知识单元缺少独立学习所需内容"))
@@ -1629,7 +1655,8 @@ def _practice_label(kind: str) -> str:
 def render_markdown(guide: StudyGuide) -> str:
     """Render a readable, print-friendly Chinese study handout."""
 
-    lines = [f"# {guide.title}", "", f"> 这是一份面向自学的讲义。预计学习时间：{guide.route.estimated_minutes} 分钟。", ""]
+    time_note = f"预计学习时间：{guide.route.estimated_minutes} 分钟。" if guide.route.estimated_minutes else "精讲待补齐，学习用时暂无法估计。"
+    lines = [f"# {guide.title}", "", "> 这是一份面向自学的讲义。" + time_note, ""]
     if guide.report.status != "complete":
         lines.extend(["> **当前状态：教学草稿**。部分例题、补链或教师内容仍需模型/人工复核；请不要把未确认内容当作考试承诺。", ""])
     lines.extend(["## 先看学习路线", "", f"**本节要解决的问题：** {guide.route.central_question}", ""])
@@ -1646,6 +1673,12 @@ def render_markdown(guide: StudyGuide) -> str:
     lines.extend(["**每个知识点的做法：** 先想一遍，再看解释；最后完成回忆、过程和迁移练习。", ""])
     for index, unit in enumerate(guide.units, 1):
         lines.extend([f'<a id="{html.escape(unit.unit_id, quote=True)}"></a>', ""])
+        if unit.content_mode == "material-only":
+            lines.extend([f"## {index}. {unit.title}", "", "> **材料已整理，精讲待补充。** 这里保留材料原文；尚缺逐步解释、完整例题和有解析的练习，暂不能靠这一单元独立学会。", "", "### 材料原文", "", unit.material_explanation, ""])
+            if any(ref.kind == "classroom_transcript" for ref in unit.source_refs):
+                lines.extend(["### 教师补充", "", unit.teacher_increment, ""])
+            lines.extend(["**如何补齐：** 补充同一课次的教师转写，或选择文本模型生成讲解；补充后仍需核对内容。", "", f"**评价信息：** {unit.assessment_signal}", "", "**来源：** " + "；".join(_md_source(item) for item in unit.source_refs), ""])
+            continue
         lines.extend([f"## {index}. {unit.title}", "", f"> **先记住一句话：** {unit.one_sentence}", "", f"### 1. 先想 30 秒：{unit.question}", "", "先不要看答案，尝试写出你认为的对象、过程或结果。", "", "### 2. 为什么要学", "", unit.why, ""])
         if unit.prerequisites:
             lines.extend([f"**需要先会：** {'；'.join(unit.prerequisites)}", ""])
@@ -1679,6 +1712,8 @@ def render_markdown(guide: StudyGuide) -> str:
             lines.append("**来源：** " + "；".join(_md_source(item) for item in unit.source_refs))
             lines.append("")
     lines.extend(["## 课后闭卷复习", "", "合上材料后，按学习顺序写出本节的主线：", "", " → ".join(guide.route.chain) or "暂无主线", ""])
+    if not guide.review_items:
+        lines.extend(["精讲与练习尚未补齐，暂不提供闭卷题。", ""])
     for index, item in enumerate(guide.review_items, 1):
         lines.extend([f"### 复习题 {index}", "", item.prompt, "", "<details><summary>查看答案</summary>", "", f"{item.answer}", "", item.explanation, "", "</details>", ""])
     lines.extend(
@@ -1734,7 +1769,7 @@ def render_html(guide: StudyGuide, *, page_images: Mapping[str, str] | None = No
 
     body: list[str] = [
         f"<h1>{esc(guide.title)}</h1>",
-        f"<p class=\"lead\">预计学习时间：{guide.route.estimated_minutes} 分钟。按路线学习，先想再看答案。</p>",
+        f"<p class=\"lead\">预计学习时间：{guide.route.estimated_minutes} 分钟。按路线学习，先想再看答案。</p>" if guide.route.estimated_minutes else '<p class="lead">精讲待补齐，学习用时暂无法估计。</p>',
     ]
     if guide.report.status != "complete":
         body.append("<aside class=\"draft\"><strong>教学草稿</strong>：部分内容仍需模型或人工复核。</aside>")
@@ -1750,6 +1785,13 @@ def render_html(guide: StudyGuide, *, page_images: Mapping[str, str] | None = No
         ]
     )
     for index, unit in enumerate(guide.units, 1):
+        if unit.content_mode == "material-only":
+            body.append(f'<article class="unit material-only" id="{esc(unit.unit_id)}"><h2>{index}. {esc(unit.title)}</h2><aside class="draft"><strong>材料已整理，精讲待补充。</strong>尚缺逐步解释、完整例题和有解析的练习，暂不能靠这一单元独立学会。</aside>')
+            body.append(f'<section><h3>材料原文</h3><p>{esc(unit.material_explanation)}</p>{material_images(unit.source_refs)}</section>')
+            if any(ref.kind == "classroom_transcript" for ref in unit.source_refs):
+                body.append(f'<section class="teacher"><h3>教师补充</h3><p>{esc(unit.teacher_increment)}</p></section>')
+            body.append(f'<p>补齐方式：补充同一课次的教师转写，或选择文本模型生成讲解；补充后仍需核对内容。</p><p>评价信息：{esc(unit.assessment_signal)}</p></article>')
+            continue
         body.extend(
             [
                 f"<article class=\"unit\" id=\"{esc(unit.unit_id)}\"><h2>{index}. {esc(unit.title)}</h2>",
@@ -1784,6 +1826,8 @@ def render_html(guide: StudyGuide, *, page_images: Mapping[str, str] | None = No
             )
         body.append("</section></article>")
     body.extend(["<h2>课后闭卷复习</h2>", f"<p class=\"central\">{esc(' → '.join(guide.route.chain))}</p>"])
+    if not guide.review_items:
+        body.append("<p>精讲与练习尚未补齐，暂不提供闭卷题。</p>")
     for index, item in enumerate(guide.review_items, 1):
         return_link = f'<p><a href="#{esc(item.unit_id)}">回到对应讲解</a></p>' if item.unit_id else ""
         body.append(

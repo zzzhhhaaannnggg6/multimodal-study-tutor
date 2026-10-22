@@ -186,8 +186,8 @@ def test_provider_practice_arithmetic_is_checked_before_completing_a_guide(kind,
 @pytest.mark.parametrize("text", ["multiple bit binary addition 01100 10001 two's complement", "minuend 10110 10010 有符号补码"])
 def test_signed_binary_material_does_not_get_an_unsigned_decimal_story(text):
     guide = generate_study_guide(LessonMap(profile="computer-systems", pages=[VisualFrame(visual_id="p1", title="补码运算", text=text, status="covered")]))
-    assert not guide.units[0].worked_examples[0].complete
-    assert "12+17=29" not in " ".join(guide.units[0].worked_examples[0].steps)
+    assert not guide.units[0].worked_examples
+    assert guide.units[0].content_mode == "material-only"
 
 
 @pytest.mark.parametrize("source", ["将二进制100101.01转换成十进制", "把(100101.01)₂转成十进制", "把(100101.01)b转换为十进制"])
@@ -229,7 +229,7 @@ def test_provider_cannot_promote_a_lost_negative_sign_to_a_complete_answer(case_
 def test_unsupported_case_cannot_pass_evaluation_by_claiming_ready_without_a_complete_example(level):
     case = next(item for item in NOTATION_SUITE["cases"] if item["case_id"] == "identical-operands-are-an-expression")
     guide = generate_study_guide(case_map(case))
-    assert not guide.units[0].worked_examples[0].complete
+    assert not guide.units[0].worked_examples
     if level == "guide":
         guide.report.status = "complete"
     else:

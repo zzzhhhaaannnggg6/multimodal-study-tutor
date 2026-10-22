@@ -41,16 +41,17 @@ def test_generate_student_guide_is_readable_and_traceable() -> None:
     guide = generate_study_guide(LessonMap.from_json(FIXTURE))
     assert guide.report.status == "draft"
     assert guide.route.chain == ["从证据到机制"]
-    assert guide.units[0].worked_examples
-    assert guide.units[0].practice_items[0].answer
-    assert {item.kind for item in guide.units[0].practice_items} >= {"retrieval", "process", "transfer"}
-    assert len(guide.units[0].worked_examples[0].steps) >= 3
-    assert guide.units[0].misconceptions
+    assert guide.units[0].content_mode == "material-only"
+    assert not guide.units[0].worked_examples
+    assert not guide.units[0].practice_items
+    assert not guide.review_items
+    assert not guide.units[0].misconceptions
     assert guide.units[0].source_refs
     markdown = render_markdown(guide)
     assert "先看学习路线" in markdown
-    assert "例题框架" in markdown
-    assert "展开答案与解析" in markdown
+    assert "精讲待补充" in markdown
+    assert "例题框架" not in markdown
+    assert "展开答案与解析" not in markdown
     assert "U3" not in markdown and "E1" not in markdown
 
 
@@ -65,10 +66,8 @@ def test_study_guide_round_trip_and_validation() -> None:
 
 def test_offline_topic_label_is_not_presented_as_a_complete_example() -> None:
     guide = generate_study_guide(LessonMap.from_json(FIXTURE))
-    example = guide.units[0].worked_examples[0]
-    assert example.complete is False
-    assert "待补充" in example.title
-    assert any(item.endswith(".worked_examples.complete") for item in guide.report.missing_fields)
+    assert not guide.units[0].worked_examples
+    assert any(item.endswith(".worked_examples") for item in guide.report.missing_fields)
 
 
 def test_incomplete_core_unit_is_rejected() -> None:
@@ -191,8 +190,8 @@ def test_teacher_addition_keeps_corrections_and_readable_honest_times() -> None:
 
 def test_c_code_alone_does_not_invent_a_riscv_translation() -> None:
     guide = generate_study_guide(LessonMap(profile="computer-systems", pages=[VisualFrame(visual_id="p1", text="int x = 10; x = 2 * x + 15;", status="covered")]))
-    assert "muli" not in guide.units[0].worked_examples[0].question
-    assert "muli" not in " ".join(guide.units[0].worked_examples[0].steps)
+    assert not guide.units[0].worked_examples
+    assert guide.units[0].content_mode == "material-only"
 
 
 def test_short_provider_answer_is_not_padded_into_a_complete_lesson() -> None:
@@ -248,7 +247,7 @@ def test_new_report_fields_keep_json_schema_compatibility() -> None:
 
 
 def test_html_review_has_return_link_and_source_quotes_are_escaped() -> None:
-    guide = generate_study_guide(LessonMap.from_json(FIXTURE))
+    guide = generate_study_guide(LessonMap.from_json(FIXTURE), CompleteProvider())
     guide.source_index[0].quote = '<script>alert("source data")</script>'
     document = render_html(guide)
     assert f'id="{guide.units[0].unit_id}"' in document
@@ -270,3 +269,62 @@ def test_provider_cannot_invent_example_source_locators() -> None:
     assert guide.units[0].status == "draft"
     assert all(ref.ref != "invented-page" for ref in guide.units[0].worked_examples[0].source_refs)
     assert any("未提供的来源" in warning for warning in guide.report.warnings)
+
+
+def test_material_only_view_preserves_every_page_without_fake_learning_tasks():
+    pages = [VisualFrame(visual_id=f"p{i}", page=i, title="待展开的主题", text=("材料细节。" * 70) + f"第{i}页末尾条件", status="covered") for i in range(1, 5)]
+    lesson = LessonMap(pages=pages)
+    before = lesson.to_dict()
+    guide = generate_study_guide(lesson)
+    unit = guide.units[0]
+    assert unit.content_mode == "material-only"
+    assert not unit.worked_examples and not unit.practice_items and not unit.tutor_bridge
+    assert not guide.route.outcomes and guide.route.estimated_minutes == 0
+    for document in (render_markdown(guide), render_html(guide)):
+        assert "精讲待补充" in document
+        assert all(f"第{i}页末尾条件" in document for i in range(1, 5))
+        assert "只改变一个条件后" not in document
+        assert "先确定被改变的条件" not in document
+        assert "展开答案与解析" not in document
+    assert lesson.to_dict() == before
+    assert StudyGuide.from_dict(json.loads(guide.to_json())).units[0].content_mode == "material-only"
+    assert not validate_study_guide(guide, strict=True).ok
+
+
+def test_provider_failure_keeps_material_only_but_real_explanation_opens_teaching_view():
+    class Unavailable:
+        def complete(self, **kwargs):
+            raise RuntimeError("synthetic unavailable")
+    lesson = LessonMap.from_json(FIXTURE)
+    failed = generate_study_guide(lesson, Unavailable())
+    assert failed.units[0].content_mode == "material-only"
+    assert not failed.review_items
+    explained = generate_study_guide(lesson, CompleteProvider())
+    assert explained.units[0].content_mode == "lesson"
+    assert explained.review_items
+    assert "展开答案与解析" in render_html(explained)
+
+
+def test_mixed_course_review_contains_only_actual_exercises():
+    guide = generate_study_guide(LessonMap(profile="mathematics", pages=[
+        VisualFrame(visual_id="p1", page=1, title="进制", text="Binary to decimal: (1101)2", status="covered"),
+        VisualFrame(visual_id="p2", page=2, title="证明", text="有界单调数列的收敛性尚待展开。", status="covered"),
+    ]))
+    assert [unit.content_mode for unit in guide.units] == ["lesson", "material-only"]
+    assert guide.review_items and {item.unit_id for item in guide.review_items} == {guide.units[0].unit_id}
+    assert len(guide.route.outcomes) == 1
+    assert "(13)₁₀" in render_html(guide)
+
+
+def test_material_view_keeps_aligned_teacher_addition_and_rejects_fake_completion():
+    lesson = LessonMap(pages=[VisualFrame(visual_id="p1", page=4, title="因果解释", text="观察到的先后顺序与因果关系。", status="covered")],
+        speech_segments=[SpeechSegment(segment_id="s1", text="注意先后顺序不能直接证明因果关系，需要另外检查作用过程。", start=12, end=18, status="verified",
+            alignment=Alignment(visual_ids=["p1"], status="aligned"))])
+    guide = generate_study_guide(lesson)
+    assert guide.units[0].content_mode == "material-only"
+    for document in (render_markdown(guide), render_html(guide)):
+        assert "另外检查作用过程" in document
+        assert "00:00:12" in document
+    guide.units[0].status = "ready"
+    guide.report.status = "complete"
+    assert any(issue.code == "unit.material_only" for issue in validate_study_guide(guide, strict=True).errors)

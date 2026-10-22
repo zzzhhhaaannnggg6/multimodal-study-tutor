@@ -109,6 +109,7 @@
         "assessment_signal": {"type": "string"},
         "source_refs": {"type": "array", "items": {"$ref": "#/$defs/source"}},
         "status": {"type": "string"},
+        "content_mode": {"enum": ["lesson", "material-only"]},
         "internal_understanding_level": {"type": "string"},
         "internal_assessment_level": {"type": "string"}
       }

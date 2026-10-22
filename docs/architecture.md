@@ -107,3 +107,9 @@ The repository now includes a local rendered-page adapter and an optional
 rejecting alignment and visual candidates, profile-specific signal rules,
 SQLite search for larger courses, and MCP/Responses adapters over `StudyAgent`
 remain next extensions.
+
+## 材料整理与精讲
+
+`LearningUnit.content_mode` 区分 `material-only` 和 `lesson`。未命中具体离线例题的单元保留完整原文，不再生成通用例题、答案和练习。只有解析出教学内容的模型回答才能切换为 `lesson`；这不意味着教学正确性已验证，质量门槛与草稿状态仍独立检查。
+
+网页、Markdown 和 HTML 均明确显示材料整理状态，材料单元不能标记为学习完成，也不进入课后题。旧版 JSON 没有这个可选字段时按 `lesson` 加载，保留原有阅读内容；重新生成后使用新的材料视图。JSON Schema 保持向后兼容，严格讲义检查不接受 `material-only` 作为完整课程。

@@ -64,6 +64,9 @@ assert(guide.source_index.some(x=>(x.quote||'').includes('Synthetic PDF evidence
 const pdfReceipt=job.materials.find(x=>x.name.endsWith('.pdf'));
 assert(pdfReceipt.rendered_page_count===1, 'bundled PDF renderer did not produce the page');
 document.querySelector('#routeCards [data-unit="1"]').click();
+assert(guide.units[1].content_mode==='material-only', 'unknown PDF topic must stay material-only');
+assert(document.querySelector('#lessonContent .content-gap'), 'missing explanation gap must be visible');
+assert(!document.querySelector('#lessonContent .practice, #lessonContent .example, #markUnit'), 'material-only view must not contain mock teaching or completion');
 const pageImage=document.querySelector('#lessonContent [data-material-image]');
 assert(pageImage, 'source page missing beside explanation');
 pageImage.scrollIntoView();

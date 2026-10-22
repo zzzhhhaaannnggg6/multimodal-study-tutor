@@ -67,9 +67,9 @@ def evaluate_case(case: dict[str, Any], guide: StudyGuide) -> dict[str, Any]:
     if not unit_refs or any(item.ref != ref or item.quote != case["source_text"] for item in unit_refs):
         failures.append("source.unit_evidence_changed")
     examples = [item for unit in guide.units for item in unit.worked_examples]
-    if not examples:
+    if not examples and case["mode"] != "abstain":
         failures.append("example.missing")
-    elif len(examples) != 1:
+    elif len(examples) > 1:
         failures.append("example.ambiguous_case")
     text = "\n".join(item.question + item.setup + "".join(item.steps) + item.answer + item.variation for item in examples)
     for fragment in case.get("forbidden", []):

@@ -13,10 +13,11 @@ from mst.io import project_paths, write_json
 from mst.models import LessonMap
 from mst.server import create_server
 from fake_model_service import FakeModelService
+from test_study_guide import CompleteProvider
 
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 with FakeModelService() as model, tempfile.TemporaryDirectory(prefix="mst-browser-") as directory:
-    guide = generate_study_guide(LessonMap.from_json(Path(__file__).resolve().parents[1] / "examples/minimal_course/lesson-map.json"))
+    guide = generate_study_guide(LessonMap.from_json(Path(__file__).resolve().parents[1] / "examples/minimal_course/lesson-map.json"), CompleteProvider())
     guide.lesson_id = "course::" + "a" * 64
     guide.title = "合成测试课程"
     # Tiny synthetic PNGs keep browser checks independent of PDF extras.

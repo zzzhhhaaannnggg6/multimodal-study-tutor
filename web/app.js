@@ -119,25 +119,27 @@
   function render() {
     const guide = state.guide, route = guide.route || {}, report = guide.generation_report || {};
     const count = units().filter(done).length, total = units().length;
+    const materialOnly = units().filter((unit) => unit.content_mode === "material-only").length;
     $("guideTitle").textContent = guide.title || "自学讲义";
-    $("heroCopy").textContent = total ? "先理解，再用例题和练习检查自己。随时可以退出，下次接着学。" : "先选课件和教师转写，生成后从学习路线开始。";
+    $("heroCopy").textContent = total && materialOnly === total ? "材料已保存，可以先查看原文和课件；具体讲解与练习还需补齐。" : total ? "先理解，再用例题和练习检查自己。随时可以退出，下次接着学。" : "先选课件和教师转写，生成后从学习路线开始。";
     $("draftNotice").hidden = !total || report.status === "complete";
-    $("draftText").textContent = `讲义内容仍需核验。${report.visual_review_pages ? `${report.visual_review_pages} 页图示或公式待复核。` : ""}${report.pending_segments ? `${report.pending_segments} 段语音未配准，未加入本课讲解。` : ""}已列出的框架和待补内容不能代替完整课程。`;
+    $("draftText").textContent = `讲义内容仍需核验。${materialOnly ? `${materialOnly} 个知识点只有材料，精讲待补充。` : ""}${report.visual_review_pages ? `${report.visual_review_pages} 页图示或公式待复核。` : ""}${report.pending_segments ? `${report.pending_segments} 段语音未配准，未加入本课讲解。` : ""}待补内容不能代替完整课程。`;
     $("centralQuestion").textContent = route.central_question || "导入后显示本课要解决的问题";
     $("learningSpine").innerHTML = list(route.chain).map((step) => `<li>${esc(step)}</li>`).join("");
     $("learningSpineNotice").hidden = !total || list(route.chain).length > 0;
     $("estimatedTime").textContent = route.estimated_minutes ? `${route.estimated_minutes} 分钟` : "—";
-    $("outcomes").innerHTML = list(route.outcomes).map((item) => `<li>${lines(item)}</li>`).join("");
+    $("outcomes").innerHTML = list(route.outcomes).map((item) => `<li>${lines(item)}</li>`).join("") || (materialOnly ? "<li>精讲待补充，暂未给出学习目标。</li>" : "");
     $("prerequisites").innerHTML = list(route.prerequisites).map((item) => `<li>${lines(item)}</li>`).join("");
     $("unitCount").textContent = `${total} 个知识单元`;
     $("progressBar").style.width = total ? `${Math.round(count / total * 100)}%` : "0%";
     $("progressText").textContent = total ? `${count}/${total} 个知识点已标记完成` : "尚未开始";
     $("startLearning").disabled = !total;
+    $("startLearning").textContent = total && materialOnly === total ? "查看已整理的材料" : "从第一个知识点开始";
     $("resumeLearning").hidden = !state.progress?.reading;
-    $("routeCards").innerHTML = units().map((unit, index) => `<button class="unit-card ${done(unit) ? "is-done" : ""}" data-unit="${index}" type="button"><span class="unit-number">${done(unit) ? "✓" : index + 1}</span><span><strong>${esc(unit.title)}</strong><small>${esc(unit.one_sentence || unit.question)}</small><em>${done(unit) ? "已标记完成 · 点击复习" : esc(unit.priority_label || "重点理解")}</em></span><span class="arrow">→</span></button>`).join("") || '<div class="empty">选择上方的材料，开始建立这节课的讲义。</div>';
+    $("routeCards").innerHTML = units().map((unit, index) => `<button class="unit-card ${done(unit) ? "is-done" : ""}" data-unit="${index}" type="button"><span class="unit-number">${done(unit) ? "✓" : index + 1}</span><span><strong>${esc(unit.title)}</strong><small>${esc(unit.one_sentence || unit.question)}</small><em>${unit.content_mode === "material-only" ? "材料已整理 · 精讲待补充" : done(unit) ? "已标记完成 · 点击复习" : esc(unit.priority_label || "重点理解")}</em></span><span class="arrow">→</span></button>`).join("") || '<div class="empty">选择上方的材料，开始建立这节课的讲义。</div>';
     renderUnit();
     $("reviewChain").innerHTML = list(route.chain).map((item, i) => `<span><b>${i + 1}</b>${esc(item)}</span>`).join("");
-    $("reviewItems").innerHTML = list(guide.review_items).map((item, i) => practice(item, i, true)).join("") || '<p class="empty">暂无复习题。</p>';
+    $("reviewItems").innerHTML = list(guide.review_items).map((item, i) => practice(item, i, true)).join("") || '<p class="empty">精讲与练习尚未补齐，暂不提供闭卷题。</p>';
     const statusLabel = {complete: "内容检查已通过（仍需教学验收）", draft: "教学草稿", "needs-content": "等待补充内容"}[report.status] || "待检查";
     $("sourceSummary").innerHTML = [["生成状态",statusLabel],["页面文字覆盖",`${report.covered_pages || 0} / ${report.total_pages || 0}`],["图示待复核",`${report.visual_review_pages || 0} 页`],["教师片段已对齐",`${report.aligned_segments || 0} / ${report.total_segments || 0}`],["语音配对待确认",report.pending_segments || 0]].map(([label,value]) => `<div><b>${label}</b><span>${esc(value)}</span></div>`).join("") + list(report.warnings).map((warning) => `<p>${lines(warning)}</p>`).join("");
     $("sourceList").innerHTML = sources(list(guide.source_index));
@@ -151,7 +153,16 @@
     const section = (title, body, className = "") => `<section class="lesson-section ${className}"><h3>${title}</h3>${body}${title === "材料中看什么" ? materialFigures(unit.source_refs) : ""}</section>`;
     const examples = list(unit.worked_examples).map((example) => section(example.complete ? "完整例题" : "例题待补充", `<p class="question"><b>题目：</b>${lines(example.question)}</p><p>${lines(example.setup)}</p><ol>${list(example.steps).map((step) => `<li>${lines(step)}</li>`).join("")}</ol><p class="answer"><b>答案：</b>${lines(example.answer)}</p><p class="variation"><b>换一个条件：</b>${lines(example.variation)}</p>`, "example")).join("");
     const mistakes = list(unit.misconceptions).map((item) => `<div><b>错误想法</b><span>${lines(item.wrong)}</span></div><div><b>正确判断</b><span>${lines(item.correct)}</span></div><div><b>纠正动作</b><span>${lines(item.correction)}</span></div>`).join("");
-    $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.index + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${esc(unit.priority_label)}</span></div><p class="grip">${lines(unit.one_sentence)}</p><section class="predict-box"><h3>先想一想</h3><p>${lines(unit.question)}</p><details><summary>需要提示时再打开</summary><p>${lines(list(unit.step_chain)[0])}</p></details></section>${section("为什么要学", `<p>${lines(unit.why)}</p><p class="small-note">先修：${list(unit.prerequisites).map(esc).join("；") || "材料尚未列明"}</p>`)}${section("材料中看什么", `<p>${lines(unit.material_explanation)}</p>`)}${section("教师补充", `<p>${lines(unit.teacher_increment)}</p>`, "teacher")}${section("导师补链：把逻辑补完整", `<p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol>`, "bridge")}${examples}${mistakes ? section("最容易错在哪里", `<div class="mistake-table">${mistakes}</div>`) : ""}${section("现在自己回答", list(unit.practice_items).map((item, i) => practice({...item, unit_id: unit.unit_id}, i)).join("") || "<p>练习仍待补充。</p>")}<div class="unit-footer"><span>评价信息：${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div><div class="finish-box"><button class="secondary-button" id="markUnit" type="button">${done(unit) ? "撤销完成标记" : "我完成了这个知识点"}</button><span class="muted">翻到下一页不会自动标为完成。</span></div><details class="unit-sources"><summary>查看这个知识点的来源</summary>${sources(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" ${state.index === 0 ? "disabled" : ""} type="button">← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.index === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
+    const onlyMaterial = unit.content_mode === "material-only";
+    let content;
+    if (onlyMaterial) {
+      const teacher = list(unit.source_refs).some((ref) => ref.kind === "classroom_transcript") ? section("教师补充", `<p>${lines(unit.teacher_increment)}</p>`, "teacher") : "";
+      content = `<aside class="content-gap"><h3>材料已整理，精讲待补充</h3><p>尚缺逐步解释、完整例题和有解析的练习。暂不能靠这一单元独立学会。</p><button class="secondary-button" type="button" data-add-explanation>补充材料或选择讲解方式</button></aside>${section("材料原文", `<p>${lines(unit.material_explanation)}</p>${materialFigures(unit.source_refs)}`)}${teacher}<p class="small-note">可补充同一课次的教师转写，或选择文本模型生成讲解；补充后仍需核对内容。</p>`;
+    } else {
+      content = `<p class="grip">${lines(unit.one_sentence)}</p><section class="predict-box"><h3>先想一想</h3><p>${lines(unit.question)}</p><details><summary>需要提示时再打开</summary><p>${lines(list(unit.step_chain)[0])}</p></details></section>${section("为什么要学", `<p>${lines(unit.why)}</p><p class="small-note">先修：${list(unit.prerequisites).map(esc).join("；") || "材料尚未列明"}</p>`)}${section("材料中看什么", `<p>${lines(unit.material_explanation)}</p>`)}${section("教师补充", `<p>${lines(unit.teacher_increment)}</p>`, "teacher")}${section("导师补链：把逻辑补完整", `<p>${lines(unit.tutor_bridge)}</p><ol class="steps">${list(unit.step_chain).map((step) => `<li>${lines(step)}</li>`).join("")}</ol>`, "bridge")}${examples}${mistakes ? section("最容易错在哪里", `<div class="mistake-table">${mistakes}</div>`) : ""}${section("现在自己回答", list(unit.practice_items).map((item, i) => practice({...item, unit_id: unit.unit_id}, i)).join("") || "<p>练习仍待补充。</p>")}`;
+    }
+    const finish = onlyMaterial ? "" : `<div class="finish-box"><button class="secondary-button" id="markUnit" type="button">${done(unit) ? "撤销完成标记" : "我完成了这个知识点"}</button><span class="muted">翻到下一页不会自动标为完成。</span></div>`;
+    $("lessonContent").innerHTML = `<div class="lesson-top"><div><p class="eyebrow">知识点 ${state.index + 1} / ${units().length}</p><h2>${esc(unit.title)}</h2></div><span class="priority">${onlyMaterial ? "精讲待补充" : esc(unit.priority_label)}</span></div>${content}<div class="unit-footer"><span>评价信息：${esc(unit.assessment_signal || "尚未观察到评价信号")}</span></div>${finish}<details class="unit-sources"><summary>查看这个知识点的来源</summary>${sources(list(unit.source_refs))}</details><div class="lesson-nav"><button class="secondary-button" id="previousUnit" ${state.index === 0 ? "disabled" : ""} type="button">← 上一个</button><button class="primary-button" id="nextUnit" type="button">${state.index === units().length - 1 ? "去课后复习" : "下一个知识点 →"}</button></div>`;
     $("lessonContent").insertAdjacentHTML("afterbegin", '<button class="link-button" data-view="route" type="button">← 返回学习路线</button>');
     const prerequisites = list(unit.prerequisite_ids).map((id) => units().find((item) => item.unit_id === id)).filter(Boolean);
     if (prerequisites.length) {
@@ -161,7 +172,7 @@
         return `<div><button class="link-button" data-return-unit="${esc(item.unit_id)}" type="button">${esc(item.title)} →</button>${reason ? `<small>${esc(reason)}</small>` : ""}</div>`;
       }).join("")}</aside>`);
     }
-    $("markUnit").onclick = () => { const scroll = window.scrollY; P.complete(state.progress, state.description, unit.unit_id, !done(unit)); save(); render(); window.scrollTo(0, scroll); };
+    if ($("markUnit")) $("markUnit").onclick = () => { const scroll = window.scrollY; P.complete(state.progress, state.description, unit.unit_id, !done(unit)); save(); render(); window.scrollTo(0, scroll); };
     $("previousUnit").onclick = () => navigate("learn", state.index - 1);
     $("nextUnit").onclick = () => state.index < units().length - 1 ? navigate("learn", state.index + 1) : navigate("review");
   }
@@ -331,6 +342,7 @@
       const unit = event.target.closest("[data-unit]");
       const view = event.target.closest("[data-view]");
       const back = event.target.closest("[data-return-unit]");
+      if (event.target.closest("[data-add-explanation]")) $("showMaterials").click();
       if (unit) navigate("learn", Number(unit.dataset.unit));
       if (view) navigate(view.dataset.view);
       if (back) { const index = units().findIndex((item) => item.unit_id === back.dataset.returnUnit); if (index >= 0) navigate("learn", index); }

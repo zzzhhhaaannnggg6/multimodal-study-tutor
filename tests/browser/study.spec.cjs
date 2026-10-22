@@ -274,6 +274,38 @@ test("a mathematics student gets the original negative-number explanation and ca
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
 });
 
+test("unexplained materials stay readable without mock exercises or completion", async ({page, request}, testInfo) => {
+  await page.goto("/");
+  await expect(page.locator("#guideTitle")).toHaveText("合成测试课程");
+  await page.locator("#materialPanel > summary").click();
+  await page.locator("#subject").selectOption("mathematics");
+  const text = "# 有界单调数列\n单调递增数列的极限与上确界。\n" + "尚待补充证明细节。".repeat(40) + "最后的限制条件不能漏掉。";
+  await page.locator("#sourceFiles").setInputFiles({name:"合成证明材料.md",mimeType:"text/markdown",buffer:Buffer.from(text)});
+  await page.locator("#generateButton").click();
+  await expect(page.locator("#uploadMessage")).toContainText("草稿已生成", {timeout:15000});
+  await expect(page.locator("#routeCards")).toContainText("精讲待补充");
+  await expect(page.locator("#startLearning")).toHaveText("查看已整理的材料");
+  await page.locator("#startLearning").click();
+  await expect(page.locator("#lessonContent .content-gap")).toBeVisible();
+  await expect(page.locator("#lessonContent")).toContainText("最后的限制条件不能漏掉");
+  await expect(page.locator("#lessonContent .practice, #lessonContent .example, #markUnit")).toHaveCount(0);
+  await expect(page.locator("#lessonContent .bridge, #lessonContent .predict-box")).toHaveCount(0);
+  await expect(page.locator("#progressText")).toContainText("0/1");
+  await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.evaluate(() => document.documentElement.clientWidth));
+  await page.locator("#lessonContent").screenshot({path:testInfo.outputPath("material-only.png")});
+  for (const format of ["md","html"]) {
+    const document = await (await request.get(`/api/exports/${format}`)).text();
+    expect(document).toContain("精讲待补充");
+    expect(document).toContain("最后的限制条件不能漏掉");
+    expect(document).not.toContain("展开答案与解析");
+  }
+  await page.locator("[data-add-explanation]").click();
+  await expect(page.locator("#materialPanel")).toHaveAttribute("open", "");
+  await expect(page.locator("#generationMode")).toHaveValue("none");
+  await page.locator("#nextUnit").click();
+  await expect(page.locator("#reviewItems")).toContainText("暂不提供闭卷题");
+});
+
 test("student can add a transcript, replace one file and reopen saved material receipts", async ({page}, testInfo) => {
   const errors = []; page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");

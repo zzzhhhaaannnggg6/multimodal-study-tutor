@@ -87,6 +87,9 @@ pre { max-width:100%; overflow-x:auto; white-space:pre; }
 .pending-files button { flex-shrink:0; }
 .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 #draftNotice .link-button { text-align:left; }
+.content-gap { margin:18px 0; padding:14px 15px; border-left:4px solid var(--amber); background:#fff8e7; }
+.content-gap h3 { margin:0 0 8px; font-size:16px; }
+.content-gap p { margin:8px 0 14px; font-size:14px; }
 .notice { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; align-items:start; }
 .generation-settings { width:100%; min-width:0; margin:10px 0; padding:14px; border:1px solid var(--line); border-radius:8px; }
 .generation-settings legend { color:var(--green); font-weight:700; font-size:15px; }
