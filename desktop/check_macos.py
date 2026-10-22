@@ -186,17 +186,21 @@ def run_check(app: Path, output: Path) -> None:
             source = source.replace("AUDIO_BYTES", json.dumps(base64.b64encode(silent_wav()).decode()))
             source = source.replace("OLD_JOB", json.dumps(results[0]["job_id"]) if results else "null")
             script.write_text(source, encoding="utf-8")
-            child = subprocess.Popen([str(launched_app / "Contents/MacOS/StudyTutor"), "--workspace", str(workspace),
-                         "--check-script", str(script), "--check-report", str(report),
-                         "--check-download-dir", str(downloads),
-                         "--check-snapshot", str(output / f"launch-{index}.png")], cwd="/tmp", env=environment,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            try:
-                status = child.wait(90)
-            except subprocess.TimeoutExpired:
-                child.kill(); child.wait(5)
-                raise AssertionError("native app check timed out") from None
-            result = json.loads(report.read_text()) if report.exists() else {"error": "native app produced no report"}
+            log_path = output / f"launch-{index}.log"
+            with log_path.open("wb") as diagnostic:
+                child = subprocess.Popen([str(launched_app / "Contents/MacOS/StudyTutor"), "--workspace", str(workspace),
+                             "--check-script", str(script), "--check-report", str(report),
+                             "--check-download-dir", str(downloads),
+                             "--check-snapshot", str(output / f"launch-{index}.png")], cwd="/tmp", env=environment,
+                             stdout=diagnostic, stderr=subprocess.STDOUT)
+                try:
+                    status = child.wait(90)
+                except subprocess.TimeoutExpired:
+                    child.kill(); child.wait(5)
+                    raise AssertionError(f"native app check timed out; diagnostic: {log_path}") from None
+            result = json.loads(report.read_text()) if report.exists() else {
+                "error": "native app produced no report", "exit_status": status,
+                "diagnostic": log_path.read_text(errors="replace")[-2000:]}
             assert status == 0 and result.get("passed"), result
             for _ in range(30):
                 try:

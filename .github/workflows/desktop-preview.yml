@@ -49,5 +49,6 @@ jobs:
           path: |
             dist/desktop-check/*.json
             dist/desktop-check/*.png
+            dist/desktop-check/*.log
           if-no-files-found: ignore
           retention-days: 14
